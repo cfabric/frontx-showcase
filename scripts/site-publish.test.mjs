@@ -15,8 +15,8 @@ function write(file, content) {
 }
 
 /** A composed package with screen extensions of the given tokens. */
-function screenPackage(name, tokens, extra = {}) {
-  write(`src-app/mfe_packages/${name}/mfe.json`, { ...extra, extensions: tokens.map((token) => ({ id: ext(token), domain: SCREEN, route: `/${token}` })) });
+function screenPackage(name, tokens, extra = {}, routes = {}) {
+  write(`src-app/mfe_packages/${name}/mfe.json`, { ...extra, extensions: tokens.map((token) => ({ id: ext(token), domain: SCREEN, route: `/${token}`, ...(routes[token] ? { seo: { routes: routes[token] } } : {}) })) });
 }
 
 beforeEach(() => {
@@ -24,7 +24,7 @@ beforeEach(() => {
   write('packages/framework/src/plugins/microfrontends/gts/frontx.screensets/instances/domains/screen.v1.json', { id: SCREEN, route: 'screen' });
   screenPackage('home-mfe', ['home']);
   screenPackage('kit-mfe', ['kit']);
-  screenPackage('demo-mfe', ['demo-a', 'demo-b']);
+  screenPackage('demo-mfe', ['demo-a', 'demo-b'], {}, { 'demo-b': { '/week': { title: 'Week' }, '/$id': { title: 'One' } } });
   screenPackage('example-mfe', ['example'], { templateExample: true });
   write('src-app/mfe_packages/shared/site/x.json', {});
 });
@@ -42,7 +42,7 @@ describe('publishingChoices and resolvePublishing', () => {
   it('resolves unlisted tokens to their extension ids, reading screens with the scanner rules', () => {
     const { domainKey, screens } = composedScreens(site);
     expect(domainKey).toBe('screen');
-    expect(screens.map((screen) => screen.token)).toEqual(['demo-a', 'demo-b', 'home', 'kit']);
+    expect(screens.map((screen) => [screen.token, screen.routes])).toEqual([['demo-a', []], ['demo-b', ['/week', '/$id']], ['home', []], ['kit', []]]);
     expect(resolvePublishing({ homeScreen: 'home', unlistedScreens: ['kit', 'demo-b'], hiddenEntries: ['teams'] }, screens)).toEqual({ unlisted: ['kit', 'demo-b'], hiddenEntries: ['teams'], hiddenScreens: [ext('demo-b'), ext('kit')] });
   });
 
@@ -75,19 +75,26 @@ describe('publishingChoices and resolvePublishing', () => {
 describe('unlistedFindings', () => {
   const publishing = { unlisted: ['kit', 'demo-a', 'demo-b'], hiddenEntries: [], hiddenScreens: [ext('demo-a'), ext('demo-b'), ext('kit')] };
   const outline = (entries) => ({ screen: 'home', strings: 'x', pages: [{ route: '/', title: 't', lead: 'l', entries }] });
-  const page = (address, indexable) => ({ address, indexable });
+  const page = (address, indexable, route) => ({ address, indexable, ...(route ? { route } : {}) });
   /** The page map template-site-meta inlines: every screen with its pages, the unlisted ones none of them indexable. */
   const pageMap = (screens = {}) => ({
     screens: {
       home: { pages: { '/': page('/?screen=home', true) }, patterns: [] },
       kit: { pages: { '/': page('/?screen=kit', false) }, patterns: [] },
       'demo-a': { pages: { '/': page('/?screen=demo-a', false) }, patterns: [] },
-      'demo-b': { pages: { '/': page('/?screen=demo-b', false), '/week': page('/?screen=demo-b;route=week', false) }, patterns: [page('/?screen=demo-b;route=$id', false)] },
+      'demo-b': { pages: { '/': page('/?screen=demo-b', false), '/week': page('/?screen=demo-b;route=week', false) }, patterns: [page('/?screen=demo-b;route=$id', false, '/$id')] },
       ...screens,
     },
   });
   const documentWith = (map, body = '') => `<head><link rel="canonical" href="https://site.example/?screen=home" /><script type="application/json" id="site-meta-map">${JSON.stringify(map)}</script></head><body>${body}</body>`;
-  const registrations = (tokens) => [{ extensions: tokens.slice(0, 1).map((token) => ({ id: ext(token) })) }, { extensions: tokens.slice(1).map((token) => ({ id: ext(token) })) }];
+  const PACKAGE = { home: 'home-mfe', kit: 'kit-mfe', 'demo-a': 'demo-mfe', 'demo-b': 'demo-mfe' };
+  /** The aggregate site-dist writes: one config per package, its manifest's publicPath the remote folder, its remote entry `remoteEntry.js`. */
+  const registrations = (tokens) =>
+    [...new Set(tokens.map((token) => PACKAGE[token]))].map((name) => ({
+      manifest: { id: `m.${name}`, metaData: { publicPath: `mfe/${name}/`, remoteEntry: { name: 'remoteEntry.js', path: '', type: 'module' } } },
+      entries: tokens.filter((token) => PACKAGE[token] === name).map((token) => ({ id: `${ext(token)}.entry`, manifest: `m.${name}` })),
+      extensions: tokens.filter((token) => PACKAGE[token] === name).map((token) => ({ id: ext(token), entry: `${ext(token)}.entry` })),
+    }));
   const clean = () => {
     write('dist/index.html', documentWith(pageMap()));
     write('dist/sitemap.xml', '<loc>https://site.example/?screen=home</loc>');
@@ -123,17 +130,27 @@ describe('unlistedFindings', () => {
     ]);
   });
 
-  it('turns red on an unlisted screen without its remote or its registration, and on a page map that lets one of its pages be indexed or has none of them', () => {
+  it('turns red on an unlisted screen whose remote entry file is missing, its folder still there, or that is not registered, and on a page map that lets one of its pages be indexed or has none of them', () => {
     clean();
-    rmSync(path.join(site, 'dist/mfe/kit-mfe'), { recursive: true });
+    rmSync(path.join(site, 'dist/mfe/kit-mfe/remoteEntry.js'));
+    write('dist/mfe/kit-mfe/assets/chunk.js', 'export {};');
     write('dist/generated-mfe-manifests.json', registrations(['home', 'kit', 'demo-b']));
-    const screens = Object.entries(pageMap({ 'demo-b': { pages: { '/': page('/?screen=demo-b', false), '/week': page('/?screen=demo-b;route=week', true) }, patterns: [] } }).screens).filter(([token]) => token !== 'kit');
+    const screens = Object.entries(pageMap({ 'demo-b': { pages: { '/': page('/?screen=demo-b', false), '/week': page('/?screen=demo-b;route=week', true) }, patterns: [page('/?screen=demo-b;route=$id', false, '/$id')] } }).screens).filter(([token]) => token !== 'kit');
     write('dist/index.html', documentWith({ screens: Object.fromEntries(screens) }));
     expect(findings()).toEqual([
       `dist/generated-mfe-manifests.json does not register the unlisted screen ${ext('demo-a')}, so its pages would not open`,
-      'dist/mfe/kit-mfe/ is missing, so the unlisted screen kit would not open',
+      'dist/mfe/kit-mfe/remoteEntry.js is missing, so the unlisted screen kit would not open',
       'dist/index.html: the page map lets /?screen=demo-b;route=week of the unlisted screen demo-b be indexed; its robots meta needs noindex',
       "dist/index.html: the page map has no pages of the unlisted screen kit, so they would take the site's head instead of their own",
+    ]);
+  });
+
+  it('turns red on a page map that leaves out an inner route or a pattern route an unlisted screen declares', () => {
+    clean();
+    write('dist/index.html', documentWith(pageMap({ 'demo-b': { pages: { '/': page('/?screen=demo-b', false) }, patterns: [] } })));
+    expect(findings()).toEqual([
+      "dist/index.html: the page map has no page /week of the unlisted screen demo-b, so it would take the site's head instead of its own",
+      "dist/index.html: the page map has no page /$id of the unlisted screen demo-b, so it would take the site's head instead of its own",
     ]);
   });
 

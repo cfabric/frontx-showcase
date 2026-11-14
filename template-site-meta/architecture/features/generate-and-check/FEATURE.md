@@ -94,7 +94,7 @@ Published metadata must never go stale silently. Generation refuses to write any
 5. [x] - `p1` - Read the built document; **IF** a linked asset is missing, stop naming each one - `inst-if-missing-assets`
 6. [x] - `p1` - Render every output and twin, with the site's publishing choices and the build's indexing - `inst-render`
    1. [x] - `p1` - **IF** the indexing is `off`, remove any `llms.txt` the build output holds - `inst-if-indexing-off`
-   2. [x] - `p1` - Remove every twin of the build output the rendered outputs do not hold (`cpt-template-site-meta-algo-generate-and-check-stale-twins`) - `inst-remove-stale-twins`
+   2. [x] - `p1` - Remove every recorded twin of the build output the rendered outputs do not hold (`cpt-template-site-meta-algo-generate-and-check-stale-twins`) - `inst-remove-stale-twins`
 7. [x] - `p1` - **FOR EACH** output, create its folder and write it into the build output - `inst-write-outputs`
 8. [x] - `p1` - **RETURN** the written files relative to the project - `inst-return-written`
 
@@ -248,14 +248,15 @@ Published metadata must never go stale silently. Generation refuses to write any
 
 - [x] `p2` - **ID**: `cpt-template-site-meta-algo-generate-and-check-stale-twins`
 
-**Input**: The project paths, the page map and the outputs the sources generate now, keyed by their path in the build output.
+**Input**: The project paths and the outputs the sources generate now, keyed by their path in the build output.
 
-**Output**: The twins of the build output the outputs do not hold, relative to it.
+**Output**: The twins of the build output the outputs do not hold, relative to it; after a generation, the record of the twins it wrote.
 
 **Steps**:
-1. [x] - `p2` - Take the twin folders the twin path rule gives: one per screen of the page map, named by its token - `inst-twin-folders`
-2. [x] - `p2` - Find every Markdown file under those folders: each is a twin a generation wrote; Markdown anywhere else in the build output (a hand-written page, a remote's file) is no twin and stays - `inst-walk-markdown`
-3. [x] - `p2` - **RETURN** those the outputs do not hold, in name order - `inst-return-stale`
+1. [x] - `p2` - Keep the record in the project's `node_modules/.cache/site-meta/twins.json`: nothing serves or deploys it, version control ignores it, and a new build output leaves it in place - `inst-record-place`
+2. [x] - `p2` - Read the recorded twins; none when there is no record yet (the first run) - `inst-read-record`
+3. [x] - `p2` - **RETURN** the recorded twins still in the build output that the outputs do not hold, in name order; a Markdown file no generation wrote (an authored page the host's public folder copies, a screen's folder included, or a remote's file) is never one - `inst-return-stale`
+4. [x] - `p2` - After writing the outputs, record their twins together with every twin recorded before, so a twin planted back later is still known as one - `inst-write-record`
 
 ### Raster Record
 
@@ -366,7 +367,7 @@ The system **MUST** run `generate` or `check` with the `--project`, `--config` a
 - [x] The check fails when a share image is configured without its alternative text.
 - [x] With `SITE_INDEXING=off`, generation writes noindex heads, a sitemap without addresses, a robots.txt that disallows everything and no `llms.txt`, removing one an earlier generation left; the check holds on that build and names a planted `llms.txt`.
 - [x] A screen `unlistedScreens` names keeps its pages in the page map of the document, none of them indexable, and is in no listing: no sitemap line, `llms.txt` line, `seo-manifest.json` entry or twin; the listed outlines' links to it are pruned with what holds them; the entries `hiddenEntries` names are in no twin; the check holds on that build.
-- [x] A twin an earlier generation wrote goes when its screen becomes unlisted, hand-written Markdown and a remote's Markdown outside the twin folders stay, and the check names a twin planted back.
+- [x] A twin an earlier generation wrote goes when its screen becomes unlisted or leaves the composition, and the check names a twin planted back; authored Markdown, in a screen's folder too, and a remote's Markdown stay; the first run, with no record, removes and reports nothing.
 - [x] A config that still carries the former key `unpublishedScreens` is refused with the rename to `unlistedScreens`.
 - [x] A missing metadata block, a missing title, a description outside 50 to 160 characters, two pages with one title, two route keys naming one address and a route key that is not a path inside the screen are each refused.
 - [x] The routing version check holds when the tool bundles the project's copy, when both copies are one version or when the project has no install, and fails when the tool resolves its own copy of another version.
@@ -377,4 +378,4 @@ The system **MUST** run `generate` or `check` with the `--project`, `--config` a
 - `check.test.ts`: the `check` cases ("reports the rules alone when site/dist has no generated outputs"; "holds right after generation, and names every output that drifts from the sources"; "writes a plain-text twin per outline page from its strings and data, lists it in llms.txt and holds it to its sources"; "refuses to generate when the build lacks an icon the head links"; "refuses to generate when the built page links an icon the build lacks, the main favicon among them"; "fails the check when a share image is configured without its alternative text"); the `checkConfig`, `linkedIcons`, `checkRoutingVersion`, `checkRasters` cases and "the duplicate canonical rule".
 - `generate.test.ts`: "seo rules hold for well-formed metadata"; "require a seo block, a title and a 50 to 160 character description"; "refuse two pages with one title, and a route key that is not a path inside the screen".
 - `args.test.ts`: the three `parseArgs` cases.
-- `publishing.test.ts`: "generates noindex heads, a sitemap without addresses, a robots.txt that disallows everything and no llms.txt; check holds and refuses a planted llms.txt"; "leaves an indexing-on build as it was"; "keeps an unlisted screen in the page map, every page of it noindex, leaves it out of the listings and the twins, and prunes the links listed outlines hold to it"; "removes the twins an earlier generation wrote once their screen is unlisted, keeps every Markdown file that is no twin, and check reports a twin planted back"; "refuses the former key unpublishedScreens instead of listing every screen"; "lists every screen when the list is absent"; "refuses a token no screen declares, the home screen, and a list that is not one of strings".
+- `publishing.test.ts`: "generates noindex heads, a sitemap without addresses, a robots.txt that disallows everything and no llms.txt; check holds and refuses a planted llms.txt"; "leaves an indexing-on build as it was"; "keeps an unlisted screen in the page map, every page of it noindex, leaves it out of the listings and the twins, and prunes the links listed outlines hold to it"; "removes the twins an earlier generation wrote once their screen is unlisted, keeps every Markdown file it did not write, a screen folder included, and check reports a twin planted back"; "removes the twins of a screen that left the composition, and check reports one planted back"; "removes and reports nothing on the first run, when no generation has recorded its twins yet"; "refuses the former key unpublishedScreens instead of listing every screen"; "lists every screen when the list is absent"; "refuses a token no screen declares, the home screen, and a list that is not one of strings".

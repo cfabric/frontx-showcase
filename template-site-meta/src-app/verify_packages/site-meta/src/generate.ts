@@ -9,7 +9,7 @@ import { isPattern, type SiteMetaMap } from './page-map.ts';
 import { renderIndexHtml, renderLlms, renderRobots, renderSeoManifest, renderSitemap, renderWebManifest, SITE_ASSETS, type PackageLlms } from './outputs.ts';
 import { checkRasters } from './rasters.ts';
 import { pruneOutline, type Publishing } from './publish.ts';
-import { readOutlines, renderTwins, twinPath, type ScreenOutline } from './twins.ts';
+import { readOutlines, renderTwins, type ScreenOutline } from './twins.ts';
 import { buildPageMap, readJson, readScreenDomain, readScreenExtensions, resolveIndexing, resolveOrigin, staticPages, unlistedScreens, type Indexing, type ScreenExtension, type SiteConfig, type SitePaths } from './site.ts';
 
 // @cpt-begin:cpt-template-site-meta-algo-generate-and-check-routing-version:p1:inst-tool-dir
@@ -236,32 +236,48 @@ export function missingAssets(paths: SitePaths, map: SiteMetaMap, indexHtml: str
 }
 
 /**
- * The twins in `dist/` the outputs do not hold, relative to `dist/` with forward slashes. The twin path rule (`twinPath`, `taskTwinPath`) puts every twin under the folder of its screen's token, so a Markdown file there that the sources no longer generate (a screen that became unlisted, a page that went) is stale; any other Markdown file of the build (a hand-written page the host's public folder ships, a remote's file) is not a twin and is left alone.
+ * Where the generator records the twins it wrote: in the project's `node_modules/.cache/`, the usual place for a tool's own state. Nothing serves or deploys it (a deploy ships the build output only), version control ignores it, and a new generation of the build output leaves it in place, so the next run still knows what the earlier ones wrote.
+ */
+// @cpt-begin:cpt-template-site-meta-algo-generate-and-check-stale-twins:p2:inst-record-place
+export const TWIN_RECORD = path.join('node_modules', '.cache', 'site-meta', 'twins.json');
+// @cpt-end:cpt-template-site-meta-algo-generate-and-check-stale-twins:p2:inst-record-place
+
+/** The twins the generations of a project wrote, by their path in `dist/`; none when there is no record yet (the first run) or the record is not a list of paths. */
+// @cpt-algo:cpt-template-site-meta-algo-generate-and-check-stale-twins:p2
+export function recordedTwins(paths: SitePaths): string[] {
+  // @cpt-begin:cpt-template-site-meta-algo-generate-and-check-stale-twins:p2:inst-read-record
+  const file = path.join(paths.project, TWIN_RECORD);
+  if (!fs.existsSync(file)) return [];
+  const value: unknown = readJson(file);
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : [];
+  // @cpt-end:cpt-template-site-meta-algo-generate-and-check-stale-twins:p2:inst-read-record
+}
+
+/**
+ * The twins in `dist/` the outputs do not hold: the recorded twins that are still there and that the sources no longer generate (a screen that became unlisted or left the composition, a page that went). Only what a generation wrote counts, so a Markdown file the generator never wrote (a page the host's public folder ships, a remote's file) is left alone, wherever it sits.
  * @param paths - the project
- * @param map - the site's page map, whose screens name every twin folder
  * @param outputs - the outputs the sources generate now, keyed by their path in `dist/`
  */
-// @cpt-algo:cpt-template-site-meta-algo-generate-and-check-stale-twins:p2
-export function staleTwins(paths: SitePaths, map: SiteMetaMap, outputs: Readonly<Record<string, string>>): string[] {
-  // @cpt-begin:cpt-template-site-meta-algo-generate-and-check-stale-twins:p2:inst-twin-folders
-  const folders = Object.keys(map.screens).map((token) => path.posix.dirname(twinPath(token, '/').slice(1)));
-  // @cpt-end:cpt-template-site-meta-algo-generate-and-check-stale-twins:p2:inst-twin-folders
-  // @cpt-begin:cpt-template-site-meta-algo-generate-and-check-stale-twins:p2:inst-walk-markdown
-  const found: string[] = [];
-  const walk = (relative: string) => {
-    const dir = path.join(paths.dist, ...relative.split('/'));
-    if (!fs.existsSync(dir) || !fs.statSync(dir).isDirectory()) return;
-    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-      const name = `${relative}/${entry.name}`;
-      if (entry.isDirectory()) walk(name);
-      else if (entry.name.endsWith('.md')) found.push(name);
-    }
-  };
-  for (const folder of folders) walk(folder);
-  // @cpt-end:cpt-template-site-meta-algo-generate-and-check-stale-twins:p2:inst-walk-markdown
+export function staleTwins(paths: SitePaths, outputs: Readonly<Record<string, string>>): string[] {
   // @cpt-begin:cpt-template-site-meta-algo-generate-and-check-stale-twins:p2:inst-return-stale
-  return found.filter((file) => !Object.hasOwn(outputs, file)).sort();
+  return recordedTwins(paths)
+    .filter((file) => !Object.hasOwn(outputs, file) && fs.existsSync(path.join(paths.dist, ...file.split('/'))))
+    .sort();
   // @cpt-end:cpt-template-site-meta-algo-generate-and-check-stale-twins:p2:inst-return-stale
+}
+
+/**
+ * Records the twins this generation wrote, with every twin an earlier generation recorded, so a twin planted back later is still known as one.
+ * @param paths - the project
+ * @param outputs - the outputs just written, keyed by their path in `dist/`; the twins are the Markdown ones
+ */
+export function recordTwins(paths: SitePaths, outputs: Readonly<Record<string, string>>): void {
+  // @cpt-begin:cpt-template-site-meta-algo-generate-and-check-stale-twins:p2:inst-write-record
+  const twins = new Set([...recordedTwins(paths), ...Object.keys(outputs).filter((file) => file.endsWith('.md'))]);
+  const file = path.join(paths.project, TWIN_RECORD);
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, `${JSON.stringify([...twins].sort(), null, 2)}\n`);
+  // @cpt-end:cpt-template-site-meta-algo-generate-and-check-stale-twins:p2:inst-write-record
 }
 
 /** Everything both commands need: config, the screen extensions, the page map on an origin with the build's indexing, and what the site leaves unlisted. */
@@ -324,13 +340,14 @@ export async function generate(run: RunOptions, env: Readonly<Record<string, str
   // @cpt-end:cpt-template-site-meta-flow-generate-and-check-generate:p1:inst-if-indexing-off
   // @cpt-begin:cpt-template-site-meta-flow-generate-and-check-generate:p1:inst-remove-stale-twins
   // A twin an earlier generation wrote goes when the sources no longer generate it, the way llms.txt goes above.
-  for (const file of staleTwins(paths, map, outputs)) fs.rmSync(path.join(paths.dist, file));
+  for (const file of staleTwins(paths, outputs)) fs.rmSync(path.join(paths.dist, file));
   // @cpt-end:cpt-template-site-meta-flow-generate-and-check-generate:p1:inst-remove-stale-twins
   // @cpt-begin:cpt-template-site-meta-flow-generate-and-check-generate:p1:inst-write-outputs
   for (const [name, content] of Object.entries(outputs)) {
     fs.mkdirSync(path.dirname(path.join(paths.dist, name)), { recursive: true });
     fs.writeFileSync(path.join(paths.dist, name), content);
   }
+  recordTwins(paths, outputs);
   // @cpt-end:cpt-template-site-meta-flow-generate-and-check-generate:p1:inst-write-outputs
   // @cpt-begin:cpt-template-site-meta-flow-generate-and-check-generate:p1:inst-return-written
   return Object.keys(outputs).map((name) => shown(paths, path.join(paths.dist, name)));
@@ -382,7 +399,7 @@ export async function check(run: RunOptions): Promise<{ errors: string[]; compar
         if (!fs.existsSync(file) || fs.readFileSync(file, 'utf8') !== content) errors.push(`${shown(paths, file)} differs from what the sources generate; run npm run seo:generate`);
       }
       // @cpt-begin:cpt-template-site-meta-flow-generate-and-check-check:p1:inst-if-stale-twins
-      for (const file of staleTwins(paths, map, outputs)) errors.push(`${shown(paths, path.join(paths.dist, file))} is a twin the sources no longer generate; run npm run seo:generate`);
+      for (const file of staleTwins(paths, outputs)) errors.push(`${shown(paths, path.join(paths.dist, file))} is a twin the sources no longer generate; run npm run seo:generate`);
       // @cpt-end:cpt-template-site-meta-flow-generate-and-check-check:p1:inst-if-stale-twins
     }
     // @cpt-end:cpt-template-site-meta-flow-generate-and-check-check:p1:inst-compare-outputs

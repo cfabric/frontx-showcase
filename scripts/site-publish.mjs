@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // What the production build links (architecture/DESIGN.md section 4.15, "Unlisted screens and indexing"). `site.config.json` lists the screens nothing links (`unlistedScreens`, route tokens) and the outline entries it hides (`hiddenEntries`); without them every screen is listed. Every screen is built either way: an unlisted screen keeps its remote and its registration, and its pages open by their address with `noindex`. Composition stays whole, so `npm run dev`, the tests and the UI gate link every screen: only the production build takes the links out.
 //   node scripts/site-publish.mjs build   runs the site build (`npm run build --prefix site`) with the publishing choices in the build variables the screens and the shell read (VITE_SITE_HIDDEN_SCREENS, VITE_SITE_HIDDEN_ENTRIES)
-//   node scripts/site-publish.mjs check   fails when the built site links an unlisted screen (an address of it in the document, the discovery files or the twins, a link in a listed screen's content), when an unlisted screen has no remote or registration, or when the page map lets one of its pages be indexed
+//   node scripts/site-publish.mjs check   fails when the built site links an unlisted screen (an address of it in the document, the discovery files or the twins, a link in a listed screen's content), when an unlisted screen has no registration or no remote entry file, or when the page map lacks a page it declares or lets one be indexed
 // `scripts/site-dist.mjs` lays out every remote, and template-site-meta keeps the unlisted screens in the page map, not indexable, and leaves them out of the discovery files and the twins.
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
@@ -54,7 +54,7 @@ export function publishingChoices(config) {
 /**
  * The screen extensions of the composed packages, read with the shell scanner rules (no `shared`, no dot entries, no package marked `templateExample`).
  * @param {string} siteDir - the site directory
- * @returns {{ domainKey: string, screens: { token: string, id: string, packageDir: string }[] }}
+ * @returns {{ domainKey: string, screens: { token: string, id: string, packageDir: string, routes: string[] }[] }} - `routes` are the paths the screen's `seo.routes` declares
  */
 export function composedScreens(siteDir) {
   // @cpt-begin:cpt-site-algo-production-build-layout-publishing:p2:inst-read-screens
@@ -67,7 +67,7 @@ export function composedScreens(siteDir) {
     const manifest = readJson(file);
     if (manifest.templateExample === true) continue;
     for (const extension of manifest.extensions ?? []) {
-      if (extension.domain === domain.id) screens.push({ token: String(extension.route).replace(/^\//, ''), id: extension.id, packageDir: name });
+      if (extension.domain === domain.id) screens.push({ token: String(extension.route).replace(/^\//, ''), id: extension.id, packageDir: name, routes: Object.keys(extension.seo?.routes ?? {}) });
     }
   }
   return { domainKey: domain.route, screens };
@@ -102,6 +102,26 @@ export function publishingEnv(publishing) {
   // @cpt-begin:cpt-site-algo-production-build-layout-publishing:p2:inst-build-variables
   return { VITE_SITE_HIDDEN_SCREENS: JSON.stringify(publishing.hiddenScreens), VITE_SITE_HIDDEN_ENTRIES: JSON.stringify(publishing.hiddenEntries) };
   // @cpt-end:cpt-site-algo-production-build-layout-publishing:p2:inst-build-variables
+}
+
+/** The folder of dist/ that holds one sub-folder per remote (`scripts/site-dist.mjs`). */
+const MFE_DIR = 'mfe';
+
+/**
+ * The remote entry file a registered screen loads, as a path in dist/: the `publicPath` of the manifest its entry names (or of its config's manifest) joined with the manifest's `remoteEntry` path and name, the way the MFE handler resolves it against the aggregate. Undefined when the manifest gives no relative address under `mfe/`.
+ * @param {object} config - the aggregate config that registers the screen
+ * @param {string} extensionId - the screen's extension id
+ * @returns {string | undefined}
+ */
+export function remoteEntryFile(config, extensionId) {
+  const extension = (config.extensions ?? []).find((candidate) => candidate.id === extensionId);
+  const entryManifest = (config.entries ?? []).find((candidate) => candidate.id === extension?.entry)?.manifest;
+  const metaData = (entryManifest && typeof entryManifest === 'object' && entryManifest.metaData ? entryManifest : config.manifest)?.metaData;
+  const publicPath = metaData?.publicPath;
+  const remoteEntry = metaData?.remoteEntry;
+  if (typeof publicPath !== 'string' || typeof remoteEntry?.name !== 'string' || remoteEntry.name === '') return undefined;
+  const file = path.posix.normalize([publicPath, remoteEntry.path ?? '', remoteEntry.name].filter(Boolean).join('/'));
+  return file.startsWith(`${MFE_DIR}/`) ? file : undefined;
 }
 
 /**
@@ -150,15 +170,15 @@ function filesUnder(dir, skip = new Set(), prefix = '') {
 
 /**
  * Where the built site links an unlisted screen, or would not open or would let be indexed one, as messages; empty when it does neither.
- * - an unlisted screen's package has no remote in `dist/mfe/`, or the aggregate in `dist/` does not register its extension, so its pages would not open;
+ * - the aggregate in `dist/` does not register an unlisted screen's extension, or the remote entry file its manifest names (`mfe/<package>/remoteEntry.js`) is not in `dist/`, so its pages would not open;
  * - a generated text file of `dist/` (the document without its page map, the discovery files, the twins; the aggregate is the registry and is left to the check above) names an unlisted screen's address (`?screen=<token>`) outside code, where a quoted source file may mention one; a generated machine file (the document, the manifests, the sitemap) names its extension id;
- * - the page map in `dist/index.html` has no pages of an unlisted screen, or lets one of its pages or pattern routes be indexed: head-sync writes the robots meta from it;
+ * - the page map in `dist/index.html` lacks a page an unlisted screen declares (its root, a route of its `seo.routes`), or lets one of its pages or pattern routes be indexed: head-sync writes the head and the robots meta from it;
  * - a listed screen package's sources under `src/` (tests aside) name such an address: its JSON data outside code, strings included, its TypeScript and Markdown anywhere, code included, since that code is what ships; or its outline, pruned as the page shows it, still links such a screen;
  * - the shell's own sources or the screens' shared content (`src-app/app/`, `src-app/mfe_packages/shared/`; TypeScript, JSON and Markdown, tests aside) name such an address anywhere, code included, since that code is what ships;
  * - a text the check reads opens a code fence that never closes, so it cannot tell its code from its links.
  * The unlisted screens' own packages are not read: a link between two unlisted pages (a demo's own navigation) leads to no listed page.
  * @param {string} siteDir - the site directory
- * @param {{ domainKey: string, screens: { token: string, id: string, packageDir: string }[] }} composed - the composed screens
+ * @param {{ domainKey: string, screens: { token: string, id: string, packageDir: string, routes: string[] }[] }} composed - the composed screens
  * @param {{ unlisted: string[], hiddenScreens: string[], hiddenEntries: string[] }} publishing - what the build links
  * @returns {string[]}
  */
@@ -170,10 +190,16 @@ export function unlistedFindings(siteDir, composed, publishing) {
   const unlisted = composed.screens.filter((screen) => publishing.unlisted.includes(screen.token));
   const aggregateFile = path.join(distDir, AGGREGATE_FILE);
   if (!fs.existsSync(aggregateFile)) findings.push(`dist/${AGGREGATE_FILE} is missing, so no screen would open`);
-  const registered = new Set(fs.existsSync(aggregateFile) ? readJson(aggregateFile).flatMap((config) => (config.extensions ?? []).map((extension) => extension.id)) : []);
+  const configs = fs.existsSync(aggregateFile) ? readJson(aggregateFile) : [];
   for (const screen of unlisted) {
-    if (!fs.existsSync(path.join(distDir, 'mfe', screen.packageDir))) findings.push(`dist/mfe/${screen.packageDir}/ is missing, so the unlisted screen ${screen.token} would not open`);
-    if (fs.existsSync(aggregateFile) && !registered.has(screen.id)) findings.push(`dist/${AGGREGATE_FILE} does not register the unlisted screen ${screen.id}, so its pages would not open`);
+    const config = configs.find((candidate) => (candidate.extensions ?? []).some((extension) => extension.id === screen.id));
+    if (!config) {
+      if (fs.existsSync(aggregateFile)) findings.push(`dist/${AGGREGATE_FILE} does not register the unlisted screen ${screen.id}, so its pages would not open`);
+      continue;
+    }
+    const entry = remoteEntryFile(config, screen.id);
+    if (entry === undefined) findings.push(`dist/${AGGREGATE_FILE} gives the unlisted screen ${screen.id} no relative remote entry under ${MFE_DIR}/, so its pages would not open`);
+    else if (!fs.existsSync(path.join(distDir, ...entry.split('/')))) findings.push(`dist/${entry} is missing, so the unlisted screen ${screen.token} would not open`);
   }
   // @cpt-end:cpt-site-algo-production-build-layout-check-links:p2:inst-check-remotes
   // @cpt-begin:cpt-site-algo-production-build-layout-check-links:p2:inst-check-outputs
@@ -205,8 +231,14 @@ export function unlistedFindings(siteDir, composed, publishing) {
   } else {
     const screens = JSON.parse(mapText).screens ?? {};
     for (const screen of unlisted) {
-      const pages = Object.hasOwn(screens, screen.token) ? [...Object.values(screens[screen.token].pages ?? {}), ...(screens[screen.token].patterns ?? [])] : [];
+      const own = Object.hasOwn(screens, screen.token) ? screens[screen.token] : undefined;
+      const pages = own ? [...Object.values(own.pages ?? {}), ...(own.patterns ?? [])] : [];
       if (pages.length === 0) findings.push(`dist/index.html: the page map has no pages of the unlisted screen ${screen.token}, so they would take the site's head instead of their own`);
+      else {
+        // Every page the screen declares in seo.routes (and its root) needs its own head, or it would take the site's.
+        const mapped = new Set([...Object.keys(own.pages ?? {}), ...(own.patterns ?? []).map((page) => page.route)]);
+        for (const route of ['/', ...screen.routes]) if (!mapped.has(route)) findings.push(`dist/index.html: the page map has no page ${route} of the unlisted screen ${screen.token}, so it would take the site's head instead of its own`);
+      }
       for (const page of pages) if (page.indexable !== false) findings.push(`dist/index.html: the page map lets ${page.address} of the unlisted screen ${screen.token} be indexed; its robots meta needs noindex`);
     }
   }

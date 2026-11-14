@@ -147,7 +147,7 @@ const FIGURES: readonly Figure[] = ['hub', 'riffle', 'turntable', 'rebuild', 'lo
 export interface MapNode {
   title: Text;
   note?: Text;
-  /** Absent when the node's screen is not published: the node stays as plain text. */
+  /** Absent when the node's screen is unlisted: the node stays as plain text. */
   href?: Href;
 }
 

@@ -111,12 +111,12 @@ describe('unlistedScreens', () => {
     expect(await check({ paths })).toEqual({ errors: [], compared: true });
   });
 
-  it('removes the twins an earlier generation wrote once their screen is unlisted, keeps every Markdown file that is no twin, and check reports a twin planted back', async () => {
+  it('removes the twins an earlier generation wrote once their screen is unlisted, keeps every Markdown file it did not write, a screen folder included, and check reports a twin planted back', async () => {
     const paths = makeProject(roots);
     await generate({ paths }, { SITE_ORIGIN: ORIGIN });
     expect(fs.existsSync(path.join(paths.dist, 'demo', 'index.md'))).toBe(true);
-    // Hand-written Markdown the host's public folder ships, and a remote's file: no twin path names them.
-    const kept = ['notes.md', 'guides/setup.md', 'assets/notes.md', 'mfe/demo-mfe/README.md'];
+    // Authored Markdown the host's public folder copies into the build, a screen's folder included, and a remote's file: no generation wrote them.
+    const kept = ['demo/notes.md', 'notes.md', 'assets/notes.md', 'mfe/demo-mfe/README.md'];
     for (const file of kept) write(path.join(paths.dist, file), 'not a twin\n');
     write(paths.config, { ...CONFIG, unlistedScreens: ['demo'] });
     await generate({ paths }, { SITE_ORIGIN: ORIGIN });
@@ -125,6 +125,24 @@ describe('unlistedScreens', () => {
     expect(await check({ paths })).toEqual({ errors: [], compared: true });
     write(path.join(paths.dist, 'demo', 'index.md'), 'left by an earlier generation\n');
     expect((await check({ paths })).errors).toEqual(['dist/demo/index.md is a twin the sources no longer generate; run npm run seo:generate']);
+  });
+
+  it('removes the twins of a screen that left the composition, and check reports one planted back', async () => {
+    const paths = makeProject(roots);
+    await generate({ paths }, { SITE_ORIGIN: ORIGIN });
+    fs.rmSync(path.join(paths.packages, 'demo-mfe'), { recursive: true });
+    await generate({ paths }, { SITE_ORIGIN: ORIGIN });
+    expect(['demo/index.md', 'demo/week.md'].filter((file) => fs.existsSync(path.join(paths.dist, file)))).toEqual([]);
+    write(path.join(paths.dist, 'demo', 'week.md'), 'left by an earlier generation\n');
+    expect((await check({ paths })).errors).toEqual(['dist/demo/week.md is a twin the sources no longer generate; run npm run seo:generate']);
+  });
+
+  it('removes and reports nothing on the first run, when no generation has recorded its twins yet', async () => {
+    const paths = makeProject(roots);
+    write(path.join(paths.dist, 'demo', 'old.md'), 'no record names it\n');
+    await generate({ paths }, { SITE_ORIGIN: ORIGIN });
+    expect(fs.existsSync(path.join(paths.dist, 'demo', 'old.md'))).toBe(true);
+    expect(await check({ paths })).toEqual({ errors: [], compared: true });
   });
 
   it('lists every screen when the list is absent', async () => {
