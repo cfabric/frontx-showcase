@@ -1,7 +1,8 @@
 // @vitest-environment node
+import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { check, generate } from './generate.ts';
 import { renderRobots } from './outputs.ts';
 import { pruneOutline } from './publish.ts';
@@ -114,7 +115,7 @@ describe('unlistedScreens', () => {
   it('removes the twins an earlier generation wrote once their screen is unlisted, keeps every Markdown file it did not write, a screen folder included, and check reports a twin planted back', async () => {
     const paths = makeProject(roots);
     await generate({ paths }, { SITE_ORIGIN: ORIGIN });
-    expect(fs.existsSync(path.join(paths.dist, 'demo', 'index.md'))).toBe(true);
+    const twin = fs.readFileSync(path.join(paths.dist, 'demo', 'index.md'), 'utf8');
     // Authored Markdown the host's public folder copies into the build, a screen's folder included, and a remote's file: no generation wrote them.
     const kept = ['demo/notes.md', 'notes.md', 'assets/notes.md', 'mfe/demo-mfe/README.md'];
     for (const file of kept) write(path.join(paths.dist, file), 'not a twin\n');
@@ -123,17 +124,18 @@ describe('unlistedScreens', () => {
     expect(['demo/index.md', 'demo/week.md'].filter((file) => fs.existsSync(path.join(paths.dist, file)))).toEqual([]);
     expect(kept.filter((file) => fs.existsSync(path.join(paths.dist, file)))).toEqual(kept);
     expect(await check({ paths })).toEqual({ errors: [], compared: true });
-    write(path.join(paths.dist, 'demo', 'index.md'), 'left by an earlier generation\n');
+    write(path.join(paths.dist, 'demo', 'index.md'), twin);
     expect((await check({ paths })).errors).toEqual(['dist/demo/index.md is a twin the sources no longer generate; run npm run seo:generate']);
   });
 
   it('removes the twins of a screen that left the composition, and check reports one planted back', async () => {
     const paths = makeProject(roots);
     await generate({ paths }, { SITE_ORIGIN: ORIGIN });
+    const twin = fs.readFileSync(path.join(paths.dist, 'demo', 'week.md'), 'utf8');
     fs.rmSync(path.join(paths.packages, 'demo-mfe'), { recursive: true });
     await generate({ paths }, { SITE_ORIGIN: ORIGIN });
     expect(['demo/index.md', 'demo/week.md'].filter((file) => fs.existsSync(path.join(paths.dist, file)))).toEqual([]);
-    write(path.join(paths.dist, 'demo', 'week.md'), 'left by an earlier generation\n');
+    write(path.join(paths.dist, 'demo', 'week.md'), twin);
     expect((await check({ paths })).errors).toEqual(['dist/demo/week.md is a twin the sources no longer generate; run npm run seo:generate']);
   });
 
@@ -168,6 +170,84 @@ describe('unlistedScreens', () => {
     await expect(generate({ paths }, { SITE_ORIGIN: ORIGIN })).rejects.toThrow('site.config.json.unlistedScreens names the home screen "home"');
     write(paths.config, { ...CONFIG, hiddenEntries: 'home-teams' });
     await expect(generate({ paths }, { SITE_ORIGIN: ORIGIN })).rejects.toThrow('site.config.json: hiddenEntries must be a list of non-empty strings');
+  });
+});
+
+describe('the twin record', () => {
+  const RECORD = path.join('node_modules', '.cache', 'site-meta', 'twins.json');
+  const recordFile = (paths: { project: string }) => path.join(paths.project, RECORD);
+  /** Adds entries to the record a generation wrote, the way a corrupt, hand-edited or copied record would carry them: each with the sha256 of what its path holds now, so only the path rules can keep it. */
+  const plant = (paths: { project: string; dist: string }, entries: string[]) => {
+    const record = JSON.parse(fs.readFileSync(recordFile(paths), 'utf8')) as { twins: Record<string, string> };
+    for (const entry of entries) record.twins[entry] = createHash('sha256').update(fs.readFileSync(path.resolve(paths.dist, entry))).digest('hex');
+    fs.writeFileSync(recordFile(paths), JSON.stringify(record));
+  };
+
+  it('never removes what a record entry names above dist/ with a parent path', async () => {
+    const paths = makeProject(roots);
+    await generate({ paths }, { SITE_ORIGIN: ORIGIN });
+    const outside = path.join(paths.project, 'outside.md');
+    write(outside, 'not in dist\n');
+    plant(paths, ['../outside.md']);
+    await generate({ paths }, { SITE_ORIGIN: ORIGIN });
+    expect(fs.existsSync(outside)).toBe(true);
+    expect(await check({ paths })).toEqual({ errors: [], compared: true });
+  });
+
+  it('never removes what an absolute record entry names', async () => {
+    const paths = makeProject(roots);
+    await generate({ paths }, { SITE_ORIGIN: ORIGIN });
+    const absolute = path.join(paths.project, 'absolute.md');
+    write(absolute, 'not in dist\n');
+    plant(paths, [absolute]);
+    await generate({ paths }, { SITE_ORIGIN: ORIGIN });
+    expect(fs.existsSync(absolute)).toBe(true);
+    expect(await check({ paths })).toEqual({ errors: [], compared: true });
+  });
+
+  it('never removes a recorded file that is not Markdown', async () => {
+    const paths = makeProject(roots);
+    await generate({ paths }, { SITE_ORIGIN: ORIGIN });
+    write(path.join(paths.dist, 'notes.txt'), 'not a twin\n');
+    plant(paths, ['notes.txt']);
+    await generate({ paths }, { SITE_ORIGIN: ORIGIN });
+    expect(fs.existsSync(path.join(paths.dist, 'notes.txt'))).toBe(true);
+  });
+
+  it('never removes a recorded path that is a link', async () => {
+    const paths = makeProject(roots);
+    await generate({ paths }, { SITE_ORIGIN: ORIGIN });
+    write(path.join(paths.project, 'target.md'), 'linked\n');
+    fs.symlinkSync(path.join(paths.project, 'target.md'), path.join(paths.dist, 'demo', 'link.md'));
+    plant(paths, ['demo/link.md']);
+    await generate({ paths }, { SITE_ORIGIN: ORIGIN });
+    expect(fs.lstatSync(path.join(paths.dist, 'demo', 'link.md')).isSymbolicLink()).toBe(true);
+    expect(await check({ paths })).toEqual({ errors: [], compared: true });
+  });
+
+  it('removes nothing on a malformed record, warns about it, and still generates', async () => {
+    const paths = makeProject(roots);
+    await generate({ paths }, { SITE_ORIGIN: ORIGIN });
+    write(paths.config, { ...CONFIG, unlistedScreens: ['demo'] });
+    for (const record of ['{ not json', '{"twins": 5}']) {
+      fs.writeFileSync(recordFile(paths), record);
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+      await generate({ paths }, { SITE_ORIGIN: ORIGIN });
+      expect(warn.mock.calls.map((call) => String(call[0]))).toEqual([expect.stringContaining('the twin record node_modules/.cache/site-meta/twins.json is not one this generator wrote; no twin is removed')]);
+      warn.mockRestore();
+      expect(fs.existsSync(path.join(paths.dist, 'demo', 'index.md'))).toBe(true);
+    }
+  });
+
+  it('keeps Markdown authored later at a former twin path, since its content is not the twin the generator wrote', async () => {
+    const paths = makeProject(roots);
+    await generate({ paths }, { SITE_ORIGIN: ORIGIN });
+    write(paths.config, { ...CONFIG, unlistedScreens: ['demo'] });
+    await generate({ paths }, { SITE_ORIGIN: ORIGIN });
+    write(path.join(paths.dist, 'demo', 'index.md'), 'authored after the screen became unlisted\n');
+    await generate({ paths }, { SITE_ORIGIN: ORIGIN });
+    expect(fs.readFileSync(path.join(paths.dist, 'demo', 'index.md'), 'utf8')).toBe('authored after the screen became unlisted\n');
+    expect(await check({ paths })).toEqual({ errors: [], compared: true });
   });
 });
 

@@ -173,6 +173,7 @@ function filesUnder(dir, skip = new Set(), prefix = '') {
 /**
  * Where the built site links an unlisted screen, or would not open or would let be indexed one, as messages; empty when it does neither.
  * - the aggregate in `dist/` does not register an unlisted screen's extension, or the remote entry file its manifest names (`mfe/<package>/remoteEntry.js`) is not in `dist/`, so its pages would not open;
+ * - Markdown sits in an unlisted screen's twin folder (`dist/<token>/`), a twin left from an earlier configuration;
  * - a generated text file of `dist/` (the document without its page map, the discovery files, the twins; the aggregate is the registry and is left to the check above) names an unlisted screen's address (`?screen=<token>`) outside code, where a quoted source file may mention one; a generated machine file (the document, the manifests, the sitemap) names its extension id;
  * - the page map in `dist/index.html` lacks a page an unlisted screen declares (its root, a route of its `seo.routes`), or lets one of its pages or pattern routes be indexed: head-sync writes the head and the robots meta from it;
  * - a listed screen package's sources under `src/` (tests aside) name such an address: its JSON data outside code, strings included, its TypeScript and Markdown anywhere, code included, since that code is what ships; or its outline, pruned as the page shows it, still links such a screen;
@@ -224,6 +225,8 @@ export function unlistedFindings(siteDir, composed, publishing) {
     const text = fs.readFileSync(path.join(distDir, file), 'utf8');
     scan(`dist/${file.split(path.sep).join('/')}`, file.endsWith('.html') ? text.replace(PAGE_MAP, '') : text, MACHINE_FILE.test(file));
   }
+  // An unlisted screen has no twin: its outline is not rendered, so Markdown in its token's folder is one left from an earlier configuration.
+  for (const screen of unlisted) for (const file of filesUnder(path.join(distDir, screen.token)).filter((name) => name.endsWith('.md'))) findings.push(`dist/${screen.token}/${file.split(path.sep).join('/')} is a twin of the unlisted screen ${screen.token}, which publishes none`);
   // @cpt-end:cpt-site-algo-production-build-layout-check-links:p2:inst-check-outputs
   // @cpt-begin:cpt-site-algo-production-build-layout-check-links:p2:inst-check-noindex
   const documentFile = path.join(distDir, 'index.html');

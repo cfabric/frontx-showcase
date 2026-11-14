@@ -90,7 +90,7 @@ jobs:
     - name: Smoke-test the dev run
       run: npm run dev:smoke
 
-  # The design-defect gate: template-design-guardrails' runner (axe-core and the layout rules) over every page of the built seo-manifest.json, every block showcase route and the not-found screen, at 1440 and 390 pixels in the light theme, against npm run dev. Only a finding scripts/design-verify-baseline.json does not carry fails; every carried finding names its reason (a G34 checker false finding or a kit defect with its GAPS row). The dark theme is not gated: only the dev Studio overlay restores a stored theme, and the production build always paints light.
+  # The design-defect gate: template-design-guardrails' runner (axe-core and the layout rules) over every page of every composed screen (the page map scripts/verify-ui.mjs builds from the composed sources, the unlisted screens included; seo-manifest.json leaves those out), every block showcase route and the not-found screen, at 1440 and 390 pixels in the light theme, against npm run dev. Only a finding scripts/design-verify-baseline.json does not carry fails; every carried finding names its reason (a G34 checker false finding or a kit defect with its GAPS row). The dark theme is not gated: only the dev Studio overlay restores a stored theme, and the production build always paints light.
   verify-ui:
     name: Verify UI
     needs: validate

@@ -152,6 +152,13 @@ describe('unlistedFindings', () => {
     expect(findings()).toEqual([`dist/generated-mfe-manifests.json declares no entry ${ext('kit')}.entry for the unlisted screen ${ext('kit')}, so its pages would not open`]);
   });
 
+  it('turns red on a twin left in the folder of an unlisted screen', () => {
+    clean();
+    write('dist/kit/index.md', '# Kit\n');
+    write('dist/demo-b/week/agent-task.md', '# Task\n');
+    expect(findings()).toEqual(['dist/demo-b/week/agent-task.md is a twin of the unlisted screen demo-b, which publishes none', 'dist/kit/index.md is a twin of the unlisted screen kit, which publishes none']);
+  });
+
   it('turns red on a page map that leaves out an inner route or a pattern route an unlisted screen declares', () => {
     clean();
     write('dist/index.html', documentWith(pageMap({ 'demo-b': { pages: { '/': page('/?screen=demo-b', false) }, patterns: [] } })));
