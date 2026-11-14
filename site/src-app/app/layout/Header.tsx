@@ -1,17 +1,17 @@
 /**
  * Header Component
  *
- * The site header: the Constructor Fabric lockup linking to the home screen, the main navigation built from the registered screens (without the groups `site.config.json` names in `headerHiddenGroups`), the source repository link and the language select (only while the site ships more than one language). It offers no theme choice: the site renders the light theme, its default (architecture/DESIGN.md section 4.3.4); theme stays a FrontX shared property every screen receives, set through the framework's theme registry.
+ * The site header: the Constructor Fabric lockup linking to the home screen, the main navigation built from the registered screens (without the groups `site.config.json` names in `headerHiddenGroups` and, in the production build, without the screens it leaves unlisted), the source repository link and the language select (only while the site ships more than one language). It offers no theme choice: the site renders the light theme, its default (architecture/DESIGN.md section 4.3.4); theme stays a FrontX shared property every screen receives, set through the framework's theme registry.
  */
 
 import React from 'react';
 import { useTranslation, SUPPORTED_LANGUAGES } from '@gears-frontx/react';
 import { SOURCE_LINKS } from './Footer';
 import { Menu } from './Menu';
-import { documentHref, homeScreen, isPlainClick, withoutGroups, type NavEntry } from './navigation';
+import { documentHref, homeScreen, isPlainClick, withoutGroups, withoutScreens, type NavEntry } from './navigation';
 import { HOME_SCREEN_TOKEN } from './home';
 import { layoutKey } from './i18n';
-import { HEADER_HIDDEN_GROUPS, offeredLanguages, SITE_LANGUAGES } from './site';
+import { HEADER_HIDDEN_GROUPS, offeredLanguages, SITE_LANGUAGES, UNLISTED_SCREENS } from './site';
 import { BrandLockup } from './ui/BrandLockup';
 import { HeaderBar } from './ui/HeaderBar';
 import { HeaderSelect } from './ui/HeaderSelect';
@@ -68,7 +68,7 @@ export const Header: React.FC<HeaderProps> = ({ entries, onOpen }) => {
           }}
         />
       }
-      nav={<Menu entries={entries && withoutGroups(entries, HEADER_HIDDEN_GROUPS)} onOpen={onOpen} />}
+      nav={<Menu entries={entries && withoutScreens(withoutGroups(entries, HEADER_HIDDEN_GROUPS), UNLISTED_SCREENS)} onOpen={onOpen} />}
       link={{ href: SOURCE_LINKS[0].href, label: t(layoutKey('nav.github')) }}
       controls={<LanguageSelect />}
     />

@@ -21,7 +21,7 @@ const REPORT_DIR = 'design-verify-report';
 const SERVER_TIMEOUT_MS = String(15 * 60 * 1000);
 
 /**
- * The routes the gate sweeps: the pages of every composed screen in menu order (the order of seo-manifest.json), the unpublished screens included (the manifest leaves them out, `npm run dev` serves them), the showcase route of every block with a fixture (folder name in kebab case, sorted), and the not-found route.
+ * The routes the gate sweeps: the pages of every composed screen in menu order, the unlisted screens included (`npm run dev` links them too), the showcase route of every block with a fixture (folder name in kebab case, sorted), and the not-found route.
  * @param {string} root - repository root
  * @returns {Promise<string[]>}
  */
@@ -34,7 +34,7 @@ export async function verifyUiRoutes(root) {
   const paths = meta.sitePaths(path.join(root, 'site'), path.join(root, 'site.config.json'));
   if (!fs.existsSync(paths.screenDomain) || !fs.existsSync(paths.packages)) throw new Error(NOT_ASSEMBLED);
   const domain = meta.readScreenDomain(paths.screenDomain);
-  // Every screen, unfiltered by unpublishedScreens; the origin only fills the canonical URLs, which the gate does not use.
+  // Every screen, none of them marked unlisted; the origin only fills the canonical URLs, which the gate does not use.
   const map = meta.buildPageMap(meta.readJson(paths.config), 'http://localhost', domain.key, meta.readScreenExtensions(paths.packages, domain.id));
   const pages = meta.staticPages(map).map((page) => page.address);
   // @cpt-end:cpt-site-algo-dev-run-verify-ui-routes:p3:inst-read-pages

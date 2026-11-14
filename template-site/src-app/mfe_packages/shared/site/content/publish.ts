@@ -1,11 +1,11 @@
 /**
- * What the site publishes: the screens a site leaves out of its production build and the outline entries it hides, and the outline as a published page shows it. The production build passes both lists in the build variables `VITE_SITE_HIDDEN_SCREENS` (screen extension ids) and `VITE_SITE_HIDDEN_ENTRIES` (outline entry ids), each a JSON array; without them every screen and entry is shown, as in `npm run dev` and the tests.
+ * What the site publishes: the screens a site leaves unlisted in its production build (built and open by their address, linked by no page) and the outline entries it hides, and the outline as a published page shows it. The production build passes both lists in the build variables `VITE_SITE_HIDDEN_SCREENS` (screen extension ids) and `VITE_SITE_HIDDEN_ENTRIES` (outline entry ids), each a JSON array; without them every screen and entry is shown, as in `npm run dev` and the tests.
  *
  * template-site-meta's site-meta package prunes the outlines it renders as plain-text twins with the same rule (`src/publish.ts` there); `scripts/publish-prune.test.mjs` holds the two copies to the same results.
  */
 
 // @cpt-begin:cpt-template-site-algo-content-model-prune-outline:p1:inst-publishing-types
-/** The screens a site leaves out, by screen extension id, and the outline entries it hides, by entry id. */
+/** The screens whose links a site hides (its unlisted screens), by screen extension id, and the outline entries it hides, by entry id. */
 export interface Publishing {
   readonly hiddenScreens: readonly string[];
   readonly hiddenEntries: readonly string[];

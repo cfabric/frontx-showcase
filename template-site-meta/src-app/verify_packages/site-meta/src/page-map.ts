@@ -37,6 +37,8 @@ export interface ScreenPages {
   readonly order: number;
   readonly pages: Readonly<Record<string, PageMeta>>;
   readonly patterns: readonly PageMeta[];
+  /** Present on a screen the site leaves unlisted: its pages keep their head, none of them indexable, and no listing (sitemap, `llms.txt`, `seo-manifest.json`) names them. */
+  readonly unlisted?: true;
 }
 
 /** The page map the generator writes and head-sync reads. */

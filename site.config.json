@@ -15,7 +15,7 @@
     "catalogue"
   ],
   "headerHiddenGroups": [],
-  "unpublishedScreens": ["blocks", "calendar", "catalogue", "inbox-chat", "inbox-contacts", "inbox-dashboard", "inbox-mail", "mfe-hello-world", "mfe-profile", "mfe-theme", "mfe-widgets"],
+  "unlistedScreens": ["blocks", "calendar", "catalogue", "inbox-chat", "inbox-contacts", "inbox-dashboard", "inbox-mail", "mfe-hello-world", "mfe-profile", "mfe-theme", "mfe-widgets"],
   "hiddenEntries": ["home-teams"],
   "twitterCard": "summary_large_image",
   "ogImage": "/og-image.png",

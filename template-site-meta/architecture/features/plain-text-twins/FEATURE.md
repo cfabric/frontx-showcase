@@ -122,7 +122,7 @@ Coding agents and crawlers that run no script cannot read a screen's content fro
 
 - [x] `p2` - **ID**: `cpt-template-site-meta-algo-plain-text-twins-prune-outline`
 
-**Input**: A parsed outline and the site's publishing choices: the extension ids of the screens it leaves out and the ids of the entries it hides.
+**Input**: A parsed outline and the site's publishing choices: the extension ids of the screens it leaves unlisted and the ids of the entries it hides.
 
 **Output**: The outline as a published page shows it, as raw outline JSON. The rule is template-site's (`shared/site/content/publish.ts`), kept here as a code-identical copy, since neither template references the other.
 
@@ -137,12 +137,12 @@ Coding agents and crawlers that run no script cannot read a screen's content fro
 
 - [x] `p2` - **ID**: `cpt-template-site-meta-algo-plain-text-twins-published-outlines`
 
-**Input**: The composed outlines, the site's publishing choices and the tokens of the screens the site leaves out.
+**Input**: The composed outlines, the site's publishing choices and the tokens of the screens the site leaves unlisted.
 
 **Output**: The outlines the twins are rendered from.
 
 **Steps**:
-1. [x] - `p2` - Drop the outline of every screen the site leaves out - `inst-drop-unpublished`
+1. [x] - `p2` - Drop the outline of every screen the site leaves unlisted, so it has no twin - `inst-drop-unlisted`
 2. [x] - `p2` - **RETURN** every other outline with its pages pruned (`cpt-template-site-meta-algo-plain-text-twins-prune-outline`) - `inst-prune-pages`
 
 ### Resolve Texts and Links
@@ -172,7 +172,7 @@ Coding agents and crawlers that run no script cannot read a screen's content fro
 2. [x] - `p2` - Render a key files explorer: each file with its path, description, line count, pinned commit link and content in a fence longer than any backtick run inside it; then, when the example still lists its screens, the example screens as links and the open link when it has one; then the pinned source line - `inst-render-explorer`
 3. [x] - `p2` - Render a list of links as Markdown list items - `inst-render-links`
 4. [x] - `p2` - Render a guide step: its heading, numbered when the step is counted, then its lead, code, files with their links, expected screen, expected result, note and links - `inst-render-step`
-5. [x] - `p2` - Render linked cards or map nodes as list items with their text; a node without a link, whose screen the site leaves out, as its title alone - `inst-render-cards`
+5. [x] - `p2` - Render linked cards or map nodes as list items with their text; a node without a link, whose screen the site leaves unlisted, as its title alone - `inst-render-cards`
 6. [x] - `p2` - **FOR EACH** entry, render it by its entry type - `inst-render-entry`
    1. [x] - `p2` - A section heading or a guide's closing heading: its heading and lead - `inst-entry-headings`
    2. [x] - `p2` - A step: the guide step with the next number; an unnumbered step: the guide step without a number, leaving the count as it is - `inst-entry-steps`
@@ -219,7 +219,7 @@ Not applicable because twins are rendered from files on each call (once per gene
 
 - [x] `p2` - **ID**: `cpt-template-site-meta-dod-plain-text-twins-render`
 
-The system **MUST** find every composed package with an outline, leave out the outlines of the screens the site does not publish and prune the others as their published pages show them, render each outline page as Markdown from its outline, strings and data with links written as canonical addresses, publish it at the path the page links (and an agent task copy next to it), refuse an outline for an unknown screen and an outline page the screen's metadata block does not declare, and read the outline model as data, keeping its own copy of the twin path rule.
+The system **MUST** find every composed package with an outline, leave out the outlines of the screens the site leaves unlisted and prune the others as their listed pages show them, render each outline page as Markdown from its outline, strings and data with links written as canonical addresses, publish it at the path the page links (and an agent task copy next to it), refuse an outline for an unknown screen and an outline page the screen's metadata block does not declare, and read the outline model as data, keeping its own copy of the twin path rule.
 
 **Implements**:
 - `cpt-template-site-meta-algo-plain-text-twins-paths`
@@ -262,13 +262,13 @@ The system **MUST** answer a request path ending in `.md` with the twin at that 
 - [x] Every home entry type renders its content; the metric comparison names no figure and leaves out an empty unit or note, the logo strip names each company as a link, and the hero's drawing name is left out.
 - [x] An entry type the renderer does not know renders nothing, and a page is read from its `entries` list only.
 - [x] A link to another screen is written as the canonical address of that screen, or of the page its show action names; a link to a screen extension the site does not have, a show action whose payload names no page or more than one page of it, a screen named by its address token, or a route beside an extension fails the rendering.
-- [x] A site that leaves screens out publishes no twin of theirs, and its twins hold no link to them: a list item or a labelled link that names one goes, with an entry or list it empties, a map node keeps its title without a link, an example whose screens all go is not shown; the entries the site hides are in no twin. Both copies of the pruning rule give one result on every outline the templates ship.
+- [x] A site that leaves screens unlisted publishes no twin of theirs, and its twins hold no link to them: a list item or a labelled link that names one goes, with an entry or list it empties, a map node keeps its title without a link, an example whose screens all go is not shown; the entries the site hides are in no twin. Both copies of the pruning rule give one result on every outline the templates ship.
 - [x] A title or link label with authored line breaks renders on one line, its breaks joined with a space.
 - [x] Under the dev server, the twin of an outline page is rendered from the current sources with links on the dev origin, and other paths get nothing.
 
 **Test scenarios** (all in `template-site-meta/src-app/verify_packages/site-meta/src/`):
 - `twins.test.ts`: "publishes an agent task's text alone next to its page's twin, with the site's address filled in, and keeps an unnumbered step unnumbered"; "renders the key files with their content as fenced code, using a fence the content cannot close"; "renders the example screens as links through their canonical addresses, the pinned source and the toolchain line"; "fills data placeholders of an external address, writes an anchor as one and lists the shell packages without an install line"; "renders every content-page arrangement under its own entry type, with the renamed headings and card arrangements"; "renders the home entries: hero actions, features, the architecture map, the change story, the kit showcase, the metrics without figures, the logo strip, the steps and the closing call"; "joins the authored line breaks of titles and link labels with a space, so a heading or a link stays on one line"; "renders nothing for an entry type it does not know, such as section or cards"; "reads a page from its entries list only"; "refuses a link to a screen extension the site does not have, a show action whose payload names no page or more than one page of it, a screen named by its address token and a route beside an extension"; `twinPath` "publishes the screen root as index.md and a route at its own path, and an agent task beside its page".
-- `publishing.test.ts`: the `pruneOutline` cases; "leaves an unpublished screen out of every output and prunes the links published outlines hold to it".
+- `publishing.test.ts`: the `pruneOutline` cases; "keeps an unlisted screen in the page map, every page of it noindex, leaves it out of the listings and the twins, and prunes the links listed outlines hold to it".
 - `scripts/publish-prune.test.mjs` of the site repository: "prune %s alike for every screen it links, and for all of them at once".
 - `dev.test.ts`: "renders the twin of an outline page from the current sources, with links on the dev origin, and answers nothing for other paths".
 - `check.test.ts` (owned by generate-and-check): "writes a plain-text twin per outline page from its strings and data, lists it in llms.txt and holds it to its sources".

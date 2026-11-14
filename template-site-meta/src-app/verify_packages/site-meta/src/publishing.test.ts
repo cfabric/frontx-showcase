@@ -90,15 +90,20 @@ describe('indexing off', () => {
   });
 });
 
-describe('unpublishedScreens', () => {
-  it('leaves an unpublished screen out of every output and prunes the links published outlines hold to it', async () => {
+describe('unlistedScreens', () => {
+  it('keeps an unlisted screen in the page map, every page of it noindex, leaves it out of the listings and the twins, and prunes the links listed outlines hold to it', async () => {
     const paths = makeProject(roots);
     writeHomeOutline(paths);
-    write(paths.config, { ...CONFIG, unpublishedScreens: ['demo'], hiddenEntries: ['home-teams'] });
+    write(paths.config, { ...CONFIG, unlistedScreens: ['demo'], hiddenEntries: ['home-teams'] });
     const written = await generate({ paths }, { SITE_ORIGIN: ORIGIN });
     expect(written.filter((file) => file.endsWith('.md'))).toEqual(['dist/home/index.md']);
-    for (const file of ['index.html', 'seo-manifest.json', 'sitemap.xml', 'llms.txt', 'home/index.md']) expect(read(paths, file)).not.toMatch(/screen=demo/);
-    expect(Object.keys(pageMapOf(read(paths, 'index.html')).screens)).toEqual(['home']);
+    for (const file of ['seo-manifest.json', 'sitemap.xml', 'llms.txt', 'home/index.md']) expect(read(paths, file)).not.toMatch(/screen=demo/);
+    const demo = pageMapOf(read(paths, 'index.html')).screens.demo;
+    expect(Object.entries(demo?.pages ?? {}).map(([route, page]) => [route, page.indexable])).toEqual([
+      ['/', false],
+      ['/week', false],
+    ]);
+    expect(pageMapOf(read(paths, 'index.html')).screens.home?.pages['/']?.indexable).toBe(true);
     const twin = read(paths, 'home/index.md');
     expect(twin).toContain('[Source](https://source.example/)');
     expect(twin).not.toContain('Try it');
@@ -106,7 +111,22 @@ describe('unpublishedScreens', () => {
     expect(await check({ paths })).toEqual({ errors: [], compared: true });
   });
 
-  it('publishes every screen when the list is absent', async () => {
+  it('removes the twins an earlier generation wrote once their screen is unlisted, keeps Markdown in the code folders, and check reports a twin planted back', async () => {
+    const paths = makeProject(roots);
+    await generate({ paths }, { SITE_ORIGIN: ORIGIN });
+    expect(fs.existsSync(path.join(paths.dist, 'demo', 'index.md'))).toBe(true);
+    write(path.join(paths.dist, 'assets', 'notes.md'), 'built asset\n');
+    write(path.join(paths.dist, 'mfe', 'demo-mfe', 'README.md'), 'remote file\n');
+    write(paths.config, { ...CONFIG, unlistedScreens: ['demo'] });
+    await generate({ paths }, { SITE_ORIGIN: ORIGIN });
+    expect(['demo/index.md', 'demo/week.md'].filter((file) => fs.existsSync(path.join(paths.dist, file)))).toEqual([]);
+    expect(['assets/notes.md', 'mfe/demo-mfe/README.md'].filter((file) => fs.existsSync(path.join(paths.dist, file)))).toEqual(['assets/notes.md', 'mfe/demo-mfe/README.md']);
+    expect(await check({ paths })).toEqual({ errors: [], compared: true });
+    write(path.join(paths.dist, 'demo', 'index.md'), 'left by an earlier generation\n');
+    expect((await check({ paths })).errors).toEqual(['dist/demo/index.md is a twin the sources no longer generate; run npm run seo:generate']);
+  });
+
+  it('lists every screen when the list is absent', async () => {
     const paths = makeProject(roots);
     writeHomeOutline(paths);
     await generate({ paths }, { SITE_ORIGIN: ORIGIN });
@@ -117,10 +137,10 @@ describe('unpublishedScreens', () => {
 
   it('refuses a token no screen declares, the home screen, and a list that is not one of strings', async () => {
     const paths = makeProject(roots);
-    write(paths.config, { ...CONFIG, unpublishedScreens: ['nope'] });
-    await expect(generate({ paths }, { SITE_ORIGIN: ORIGIN })).rejects.toThrow('site.config.json.unpublishedScreens names "nope", which no screen of the site declares');
-    write(paths.config, { ...CONFIG, unpublishedScreens: ['home'] });
-    await expect(generate({ paths }, { SITE_ORIGIN: ORIGIN })).rejects.toThrow('site.config.json.unpublishedScreens names the home screen "home"');
+    write(paths.config, { ...CONFIG, unlistedScreens: ['nope'] });
+    await expect(generate({ paths }, { SITE_ORIGIN: ORIGIN })).rejects.toThrow('site.config.json.unlistedScreens names "nope", which no screen of the site declares');
+    write(paths.config, { ...CONFIG, unlistedScreens: ['home'] });
+    await expect(generate({ paths }, { SITE_ORIGIN: ORIGIN })).rejects.toThrow('site.config.json.unlistedScreens names the home screen "home"');
     write(paths.config, { ...CONFIG, hiddenEntries: 'home-teams' });
     await expect(generate({ paths }, { SITE_ORIGIN: ORIGIN })).rejects.toThrow('site.config.json: hiddenEntries must be a list of non-empty strings');
   });
