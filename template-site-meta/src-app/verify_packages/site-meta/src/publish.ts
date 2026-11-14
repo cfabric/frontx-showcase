@@ -1,11 +1,11 @@
 /**
- * The outlines as a site publishes them: a site that leaves screens out of its build (`unpublishedScreens` in its config) shows no link to them, and a site that hides outline entries (`hiddenEntries`) shows none of them. The plain-text twins render the outlines pruned this way, so a twin shows what its page shows.
+ * The outlines as a site publishes them: a site that leaves screens unlisted (`unlistedScreens` in its config) shows no link to them, and a site that hides outline entries (`hiddenEntries`) shows none of them. The plain-text twins render the outlines pruned this way, so a twin shows what its page shows.
  *
  * The rule is the one template-site's shared content folder applies before it renders a page (`shared/site/content/publish.ts`); the two copies stay code-identical, and `scripts/publish-prune.test.mjs` of the site repository holds them to the same results.
  */
 
 // @cpt-begin:cpt-template-site-meta-algo-plain-text-twins-prune-outline:p2:inst-publishing-types
-/** The screens a site leaves out, by screen extension id, and the outline entries it hides, by entry id. */
+/** The screens whose links a site hides (its unlisted screens), by screen extension id, and the outline entries it hides, by entry id. */
 export interface Publishing {
   readonly hiddenScreens: readonly string[];
   readonly hiddenEntries: readonly string[];

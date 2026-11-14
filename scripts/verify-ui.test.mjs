@@ -18,9 +18,9 @@ describe('verifyUiRoutes', () => {
 
   const SCREEN_DOMAIN = 'gts.frontx.mfes.ext.domain.v1~frontx.screensets.layout.screen.v1';
   const screen = (token, order, seo = {}) => ({ id: `ext.${token}`, domain: SCREEN_DOMAIN, route: `/${token}`, presentation: { label: token, order }, seo });
-  /** A composed site: home, then a demo screen with a sub-page that the build leaves out, the way site.config.json leaves screens out. */
-  const assembled = (unpublishedScreens) => {
-    write('site.config.json', JSON.stringify({ siteName: 'Site', titleTemplate: '%s | Site', homeScreen: 'home', defaultDescription: 'A site.', locale: 'en', twitterCard: 'summary', unpublishedScreens }));
+  /** A composed site: home, then a demo screen with a sub-page that the build leaves unlisted, the way site.config.json leaves screens unlisted. */
+  const assembled = (unlistedScreens) => {
+    write('site.config.json', JSON.stringify({ siteName: 'Site', titleTemplate: '%s | Site', homeScreen: 'home', defaultDescription: 'A site.', locale: 'en', twitterCard: 'summary', unlistedScreens }));
     write('site/packages/framework/src/plugins/microfrontends/gts/frontx.screensets/instances/domains/screen.v1.json', JSON.stringify({ id: SCREEN_DOMAIN, route: 'screen' }));
     write('site/src-app/mfe_packages/home-mfe/mfe.json', JSON.stringify({ extensions: [screen('home', 10)] }));
     write('site/src-app/mfe_packages/demo-mfe/mfe.json', JSON.stringify({ extensions: [screen('demo', 20, { routes: { '/week': { title: 'Week' } } })] }));
@@ -36,7 +36,7 @@ describe('verifyUiRoutes', () => {
     expect(await verifyUiRoutes(root)).toEqual(['/?screen=home', '/?screen=demo', '/?screen=demo;route=week', '/?screen=blocks;route=hero', '/?screen=blocks;route=path-cards', NOT_FOUND_ROUTE]);
   });
 
-  it('keeps the pages of a screen the build leaves out, since npm run dev serves it', async () => {
+  it('keeps the pages of a screen the build leaves unlisted, since npm run dev links it', async () => {
     assembled(['demo']);
     expect(await verifyUiRoutes(root)).toEqual(['/?screen=home', '/?screen=demo', '/?screen=demo;route=week', NOT_FOUND_ROUTE]);
   });

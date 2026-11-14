@@ -16,7 +16,7 @@
   - [Read the Sources](#read-the-sources)
   - [Resolve the Origin](#resolve-the-origin)
   - [Resolve the Indexing](#resolve-the-indexing)
-  - [Published Screens](#published-screens)
+  - [Unlisted Screens](#unlisted-screens)
   - [Canonical Address](#canonical-address)
   - [Build the Page Map](#build-the-page-map)
   - [Resolve the Page of an Address](#resolve-the-page-of-an-address)
@@ -130,19 +130,19 @@ No actor starts this feature directly. The project developer acts on it only by 
 2. [x] - `p1` - **IF** the value is neither `on` nor `off`, fail naming it and the two values - `inst-if-unknown-indexing`
 3. [x] - `p1` - **RETURN** the value - `inst-return-indexing`
 
-### Published Screens
+### Unlisted Screens
 
 - [x] `p1` - **ID**: `cpt-template-site-meta-algo-page-map-published-screens`
 
 **Input**: The site configuration and the screen extensions of the composed packages.
 
-**Output**: The screen extensions the site publishes, and the extension ids of the ones it leaves out.
+**Output**: The route tokens and the extension ids of the screens the site leaves unlisted: built and open by their address, linked by nothing.
 
 **Steps**:
-1. [x] - `p1` - Take the route tokens `unpublishedScreens` names, none when absent, and every screen extension's token - `inst-read-list`
+1. [x] - `p1` - Take the route tokens `unlistedScreens` names, none when absent, and every screen extension's token - `inst-read-list`
 2. [x] - `p1` - **IF** the list names a token no screen extension declares, fail naming each such token - `inst-if-unknown-token`
-3. [x] - `p1` - **IF** the list names the configured home screen, fail naming it - `inst-if-home-unpublished`
-4. [x] - `p1` - **RETURN** the screen extensions whose token the list does not name, and the extension ids of those it names - `inst-return-split`
+3. [x] - `p1` - **IF** the list names the configured home screen, fail naming it - `inst-if-home-unlisted`
+4. [x] - `p1` - **RETURN** the tokens and the extension ids of the screen extensions the list names - `inst-return-split`
 
 ### Canonical Address
 
@@ -163,7 +163,7 @@ No actor starts this feature directly. The project developer acts on it only by 
 
 - [x] `p1` - **ID**: `cpt-template-site-meta-algo-page-map-build-map`
 
-**Input**: The site configuration, the resolved origin, the screen domain key, the published screen extensions and the build's indexing.
+**Input**: The site configuration, the resolved origin, the screen domain key, every screen extension, the build's indexing and the tokens of the unlisted screens.
 
 **Output**: The page map: site fields, the home page, the fallback page and one entry per screen with its static pages and pattern pages.
 
@@ -172,16 +172,16 @@ No actor starts this feature directly. The project developer acts on it only by 
 2. [x] - `p1` - **IF** any token is declared twice, fail naming each token and its packages - `inst-if-duplicate-tokens`
 3. [x] - `p1` - Title a document with the site name alone on the home page and with the title template applied to the page title on every other page - `inst-document-title`
 4. [x] - `p1` - **FOR EACH** screen extension - `inst-foreach-screen`
-   1. [x] - `p1` - Take its metadata block, or an empty one, and whether its token is the configured home screen - `inst-screen-block`
+   1. [x] - `p1` - Take its metadata block, or an empty one, whether its token is the configured home screen and whether the site leaves it unlisted - `inst-screen-block`
    2. [x] - `p1` - Build a page from its fields and the inherited fields: address and canonical address on the origin; title from the page, the inherited block, the screen's label or the token; the document title; description from the page, the inherited block or the site default; the share image of the page or the inherited one - `inst-build-page`
-      1. [x] - `p1` - **IF** the build's indexing is `off`, the page is not indexable, whatever it declares; **ELSE** it is indexable unless set otherwise or the route is a pattern - `inst-if-indexing-off`
+      1. [x] - `p1` - **IF** the build's indexing is `off` or the screen is unlisted, the page is not indexable, whatever it declares; **ELSE** it is indexable unless set otherwise or the route is a pattern - `inst-if-indexing-off`
    3. [x] - `p1` - Build the screen root page from the screen's own block, inheriting nothing - `inst-root-page`
    4. [x] - `p1` - **FOR EACH** declared route, build its page inheriting the screen's share image; **IF** the route is a pattern, keep it with the pattern pages, **ELSE** with the static pages - `inst-foreach-route`
-   5. [x] - `p1` - Record the screen with its label (the token when absent), its menu order (last when absent), its static pages and its pattern pages - `inst-record-screen`
+   5. [x] - `p1` - Record the screen with its label (the token when absent), its menu order (last when absent), its static pages and its pattern pages, marked unlisted when the site leaves it so - `inst-record-screen`
 5. [x] - `p1` - **IF** the configured home screen is not an own key of the screens, fail naming it - `inst-if-unknown-home`
 6. [x] - `p1` - Build the fallback page: canonical to the home page, the site name as title and document title, the site default description, not indexable - `inst-fallback-page`
 7. [x] - `p1` - **RETURN** the map with the site name, origin, locale and card type, the share image resolved under the origin's path with its alternative text only when both are set, the theme colour, the screen domain key, the `route` parameter name, the home page, the fallback page and the screens - `inst-return-map`
-8. [x] - `p1` - List the static pages of a map: screens in menu order, pages in declaration order - `inst-static-pages`
+8. [x] - `p1` - List the static pages of a map: screens in menu order, pages in declaration order; for a listing, only the screens not marked unlisted - `inst-static-pages`
 
 ### Resolve the Page of an Address
 
@@ -216,7 +216,7 @@ Not applicable because the page map is an immutable value built once per run (or
 
 - [x] `p1` - **ID**: `cpt-template-site-meta-dod-page-map-sources`
 
-The system **MUST** resolve every path from the project it is given, read the screen extensions with the shell's scanner rules (no `shared`, no dot-directories, no template example, no other domain), take the screen domain key from the shell's screen domain instance rather than from configuration, resolve the origin from the preview override or the configuration with no default, refusing a non-http address and one with a query or fragment, resolve the indexing from `SITE_INDEXING` (`on` by default, `off`, nothing else), and leave out the screens `unpublishedScreens` names, refusing a token no screen declares and the home screen.
+The system **MUST** resolve every path from the project it is given, read the screen extensions with the shell's scanner rules (no `shared`, no dot-directories, no template example, no other domain), take the screen domain key from the shell's screen domain instance rather than from configuration, resolve the origin from the preview override or the configuration with no default, refusing a non-http address and one with a query or fragment, resolve the indexing from `SITE_INDEXING` (`on` by default, `off`, nothing else), and resolve the screens `unlistedScreens` names, refusing a token no screen declares and the home screen.
 
 **Implements**:
 - `cpt-template-site-meta-algo-page-map-project-paths`
@@ -235,7 +235,7 @@ The system **MUST** resolve every path from the project it is given, read the sc
 
 - [x] `p1` - **ID**: `cpt-template-site-meta-dod-page-map-map`
 
-The system **MUST** build one page map from the published screens' metadata blocks and the site configuration only, with no page indexable when the build's indexing is off, write every address with the routing grammar's serializer and the `route` parameter, resolve a live address with the routing grammar's parser to its page (bare mount address to the home page, static page, pattern page with its own address as canonical, otherwise the fallback page), take own keys only in every lookup, and refuse duplicate screen tokens and an unknown home screen.
+The system **MUST** build one page map from every screen's metadata block and the site configuration only, with no page indexable when the build's indexing is off and no page of an unlisted screen indexable, write every address with the routing grammar's serializer and the `route` parameter, resolve a live address with the routing grammar's parser to its page (bare mount address to the home page, static page, pattern page with its own address as canonical, otherwise the fallback page), take own keys only in every lookup, and refuse duplicate screen tokens and an unknown home screen.
 
 **Implements**:
 - `cpt-template-site-meta-algo-page-map-canonical-address`
@@ -254,7 +254,7 @@ The system **MUST** build one page map from the published screens' metadata bloc
 - [x] Without an origin the run fails with a message naming `site.config.json.origin`; the preview override wins over the configuration; a sub-path is kept without its trailing slash; a query, a fragment or a non-http address is refused.
 - [x] The home page is titled with the site name and every other page with the title template; pattern routes are kept apart and are not indexable.
 - [x] `SITE_INDEXING` is `on` when unset and takes `on` or `off`; any other value is refused. With `off`, no page of the map is indexable, the home page, pattern routes and pages that declare themselves indexable included.
-- [x] A screen `unpublishedScreens` names has no page in the map; the list refuses a token no screen declares and the home screen; without the list every screen is published.
+- [x] A screen `unlistedScreens` names keeps its pages in the map, none of them indexable, and is marked unlisted; the list refuses a token no screen declares and the home screen; without the list every screen is listed.
 - [x] Two screen extensions with one token are refused with both packages named; a home screen the site does not have, or one named like an object prototype key, is refused.
 - [x] The bare mount address resolves to the home page (also under a sub-path), a screen root and an inner route resolve to their pages, a pattern route resolves with the address itself as canonical, and any other address, including tokens and paths named like object prototype keys, resolves to the non-indexable fallback.
 - [x] The `route` parameter convention holds: a router built with routing-tanstack's public API in composed mode projects `?screen=x;route=a/b` onto the virtual pathname `/a/b`.

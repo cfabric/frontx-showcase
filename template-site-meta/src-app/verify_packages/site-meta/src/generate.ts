@@ -10,7 +10,7 @@ import { renderIndexHtml, renderLlms, renderRobots, renderSeoManifest, renderSit
 import { checkRasters } from './rasters.ts';
 import { pruneOutline, type Publishing } from './publish.ts';
 import { readOutlines, renderTwins, type ScreenOutline } from './twins.ts';
-import { buildPageMap, publishedScreens, readJson, readScreenDomain, readScreenExtensions, resolveIndexing, resolveOrigin, screenToken, staticPages, type Indexing, type ScreenExtension, type SiteConfig, type SitePaths } from './site.ts';
+import { buildPageMap, readJson, readScreenDomain, readScreenExtensions, resolveIndexing, resolveOrigin, staticPages, unlistedScreens, type Indexing, type ScreenExtension, type SiteConfig, type SitePaths } from './site.ts';
 
 // @cpt-begin:cpt-template-site-meta-algo-generate-and-check-routing-version:p1:inst-tool-dir
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -78,7 +78,7 @@ export function checkConfig(config: SiteConfig): string[] {
   // The file is read as JSON without a schema, so each llms.txt section is checked for the shape the renderer writes: one line of heading, one line per item.
   const line = (value: unknown) => typeof value === 'string' && value.trim() !== '' && !/[\r\n]/.test(value);
   // The publishing lists are read the same way: each a list of strings.
-  for (const name of ['unpublishedScreens', 'hiddenEntries'] as const) {
+  for (const name of ['unlistedScreens', 'hiddenEntries'] as const) {
     const value: unknown = config[name];
     if (value !== undefined && (!Array.isArray(value) || !value.every((item) => typeof item === 'string' && item !== ''))) errors.push(`site.config.json: ${name} must be a list of non-empty strings`);
   }
@@ -167,31 +167,31 @@ export function checkRoutingVersion(paths: SitePaths, toolDir: string = TOOL_DIR
 }
 
 /**
- * The outlines of the published screens as their pages show them: a screen the site leaves out has no outline here, and every other outline is pruned by the site's publishing choices (`publish.ts`).
+ * The outlines of the listed screens as their pages show them: an unlisted screen has no outline here, so no twin, and every other outline is pruned by the site's publishing choices (`publish.ts`).
  * @param outlines - the composed packages' outlines
  * @param publishing - the hidden screens and entries
- * @param unpublished - the route tokens of the screens the site leaves out
+ * @param unlisted - the route tokens of the screens nothing links
  */
 // @cpt-algo:cpt-template-site-meta-algo-plain-text-twins-published-outlines:p2
-export function publishedOutlines(outlines: readonly ScreenOutline[], publishing: Publishing, unpublished: readonly string[]): ScreenOutline[] {
-  // @cpt-begin:cpt-template-site-meta-algo-plain-text-twins-published-outlines:p2:inst-drop-unpublished
-  const shown = outlines.filter((outline) => !unpublished.includes(outline.screen));
-  // @cpt-end:cpt-template-site-meta-algo-plain-text-twins-published-outlines:p2:inst-drop-unpublished
+export function publishedOutlines(outlines: readonly ScreenOutline[], publishing: Publishing, unlisted: readonly string[]): ScreenOutline[] {
+  // @cpt-begin:cpt-template-site-meta-algo-plain-text-twins-published-outlines:p2:inst-drop-unlisted
+  const shown = outlines.filter((outline) => !unlisted.includes(outline.screen));
+  // @cpt-end:cpt-template-site-meta-algo-plain-text-twins-published-outlines:p2:inst-drop-unlisted
   // @cpt-begin:cpt-template-site-meta-algo-plain-text-twins-published-outlines:p2:inst-prune-pages
   return shown.map((outline) => ({ ...outline, pages: (pruneOutline({ pages: outline.pages }, publishing) as { pages: ScreenOutline['pages'] }).pages }));
   // @cpt-end:cpt-template-site-meta-algo-plain-text-twins-published-outlines:p2:inst-prune-pages
 }
 
-/** What the site publishes, as one run resolved it: the hidden screens and entries, and the route tokens of the screens left out. */
+/** What the site publishes, as one run resolved it: the hidden screens (the extension ids of the unlisted screens) and entries, and the route tokens of the unlisted screens. */
 export interface SitePublishing extends Publishing {
-  readonly unpublished: readonly string[];
+  readonly unlisted: readonly string[];
 }
 
 /** The outputs for a page map, keyed by their path in `dist/`: the head, the discovery files, the web manifest and the plain-text twins of the published outline pages. With indexing off, robots.txt disallows every path and no `llms.txt` is written. */
 // @cpt-algo:cpt-template-site-meta-algo-generate-and-check-render-outputs:p1
-export async function renderOutputs(paths: SitePaths, config: SiteConfig, map: SiteMetaMap, indexHtml: string, publishing: SitePublishing = { hiddenScreens: [], hiddenEntries: [], unpublished: [] }, indexing: Indexing = 'on'): Promise<Record<string, string>> {
+export async function renderOutputs(paths: SitePaths, config: SiteConfig, map: SiteMetaMap, indexHtml: string, publishing: SitePublishing = { hiddenScreens: [], hiddenEntries: [], unlisted: [] }, indexing: Indexing = 'on'): Promise<Record<string, string>> {
   // @cpt-begin:cpt-template-site-meta-algo-generate-and-check-render-outputs:p1:inst-render-twins
-  const twins = renderTwins(publishedOutlines(readOutlines(paths.packages), publishing, publishing.unpublished), map);
+  const twins = renderTwins(publishedOutlines(readOutlines(paths.packages), publishing, publishing.unlisted), map);
   // @cpt-end:cpt-template-site-meta-algo-generate-and-check-render-outputs:p1:inst-render-twins
   // @cpt-begin:cpt-template-site-meta-algo-generate-and-check-render-outputs:p1:inst-return-outputs
   return {
@@ -234,7 +234,39 @@ export function missingAssets(paths: SitePaths, map: SiteMetaMap, indexHtml: str
   // @cpt-end:cpt-template-site-meta-algo-generate-and-check-linked-assets:p2:inst-return-missing
 }
 
-/** Everything both commands need: config, the published screen extensions, the page map on an origin with the build's indexing, and what the site leaves out. */
+/** The folders of `dist/` that hold the build's code, never a twin: the host's assets and the remotes' folders. */
+// @cpt-begin:cpt-template-site-meta-algo-generate-and-check-stale-twins:p2:inst-code-folders
+const CODE_FOLDERS = new Set(['assets', 'mfe']);
+// @cpt-end:cpt-template-site-meta-algo-generate-and-check-stale-twins:p2:inst-code-folders
+
+/**
+ * The twins in `dist/` the outputs do not hold, relative to `dist/` with forward slashes: every Markdown file outside the code folders is a twin the generator wrote, so one the sources no longer generate (a screen that became unlisted, a page that went) is stale.
+ * @param paths - the project
+ * @param outputs - the outputs the sources generate now, keyed by their path in `dist/`
+ */
+// @cpt-algo:cpt-template-site-meta-algo-generate-and-check-stale-twins:p2
+export function staleTwins(paths: SitePaths, outputs: Readonly<Record<string, string>>): string[] {
+  // @cpt-begin:cpt-template-site-meta-algo-generate-and-check-stale-twins:p2:inst-walk-markdown
+  const found: string[] = [];
+  const walk = (dir: string, prefix: string) => {
+    if (!fs.existsSync(dir)) return;
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      const name = prefix === '' ? entry.name : `${prefix}/${entry.name}`;
+      if (entry.isDirectory()) {
+        if (!(prefix === '' && CODE_FOLDERS.has(entry.name))) walk(path.join(dir, entry.name), name);
+      } else if (entry.name.endsWith('.md')) {
+        found.push(name);
+      }
+    }
+  };
+  walk(paths.dist, '');
+  // @cpt-end:cpt-template-site-meta-algo-generate-and-check-stale-twins:p2:inst-walk-markdown
+  // @cpt-begin:cpt-template-site-meta-algo-generate-and-check-stale-twins:p2:inst-return-stale
+  return found.filter((file) => !Object.hasOwn(outputs, file)).sort();
+  // @cpt-end:cpt-template-site-meta-algo-generate-and-check-stale-twins:p2:inst-return-stale
+}
+
+/** Everything both commands need: config, the screen extensions, the page map on an origin with the build's indexing, and what the site leaves unlisted. */
 // @cpt-algo:cpt-template-site-meta-algo-generate-and-check-load-site:p1
 export function loadSite(paths: SitePaths, origin: (config: SiteConfig) => string, indexing: Indexing = 'on') {
   // @cpt-begin:cpt-template-site-meta-algo-generate-and-check-load-site:p1:inst-read-config
@@ -247,14 +279,14 @@ export function loadSite(paths: SitePaths, origin: (config: SiteConfig) => strin
   const all = readScreenExtensions(paths.packages, domain.id);
   // @cpt-end:cpt-template-site-meta-algo-generate-and-check-load-site:p1:inst-read-extensions
   // @cpt-begin:cpt-template-site-meta-algo-generate-and-check-load-site:p1:inst-published-screens
-  const { published: extensions, hiddenScreens } = publishedScreens(config, all);
-  const publishing: SitePublishing = { hiddenScreens, hiddenEntries: config.hiddenEntries ?? [], unpublished: all.filter((extension) => hiddenScreens.includes(extension.id)).map(screenToken) };
+  const { unlisted, hiddenScreens } = unlistedScreens(config, all);
+  const publishing: SitePublishing = { hiddenScreens, hiddenEntries: config.hiddenEntries ?? [], unlisted };
   // @cpt-end:cpt-template-site-meta-algo-generate-and-check-load-site:p1:inst-published-screens
   // @cpt-begin:cpt-template-site-meta-algo-generate-and-check-load-site:p1:inst-build-map
-  const map = buildPageMap(config, origin(config), domain.key, extensions, indexing);
+  const map = buildPageMap(config, origin(config), domain.key, all, indexing, unlisted);
   // @cpt-end:cpt-template-site-meta-algo-generate-and-check-load-site:p1:inst-build-map
   // @cpt-begin:cpt-template-site-meta-algo-generate-and-check-load-site:p1:inst-return-site
-  return { config, extensions, map, publishing };
+  return { config, extensions: all, map, publishing };
   // @cpt-end:cpt-template-site-meta-algo-generate-and-check-load-site:p1:inst-return-site
 }
 
@@ -292,6 +324,10 @@ export async function generate(run: RunOptions, env: Readonly<Record<string, str
   // A build that may not be indexed publishes no llms.txt, not even one an earlier generation left.
   if (indexing === 'off') fs.rmSync(path.join(paths.dist, 'llms.txt'), { force: true });
   // @cpt-end:cpt-template-site-meta-flow-generate-and-check-generate:p1:inst-if-indexing-off
+  // @cpt-begin:cpt-template-site-meta-flow-generate-and-check-generate:p1:inst-remove-stale-twins
+  // A twin an earlier generation wrote goes when the sources no longer generate it, the way llms.txt goes above.
+  for (const file of staleTwins(paths, outputs)) fs.rmSync(path.join(paths.dist, file));
+  // @cpt-end:cpt-template-site-meta-flow-generate-and-check-generate:p1:inst-remove-stale-twins
   // @cpt-begin:cpt-template-site-meta-flow-generate-and-check-generate:p1:inst-write-outputs
   for (const [name, content] of Object.entries(outputs)) {
     fs.mkdirSync(path.dirname(path.join(paths.dist, name)), { recursive: true });
@@ -347,6 +383,9 @@ export async function check(run: RunOptions): Promise<{ errors: string[]; compar
         const file = path.join(paths.dist, name);
         if (!fs.existsSync(file) || fs.readFileSync(file, 'utf8') !== content) errors.push(`${shown(paths, file)} differs from what the sources generate; run npm run seo:generate`);
       }
+      // @cpt-begin:cpt-template-site-meta-flow-generate-and-check-check:p1:inst-if-stale-twins
+      for (const file of staleTwins(paths, outputs)) errors.push(`${shown(paths, path.join(paths.dist, file))} is a twin the sources no longer generate; run npm run seo:generate`);
+      // @cpt-end:cpt-template-site-meta-flow-generate-and-check-check:p1:inst-if-stale-twins
     }
     // @cpt-end:cpt-template-site-meta-flow-generate-and-check-check:p1:inst-compare-outputs
   }

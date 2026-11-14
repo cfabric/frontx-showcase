@@ -2,10 +2,9 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { composedScreens, publishedAggregate, publishingChoices, publishingEnv, resolvePublishing, unpublishedFindings, withoutCode } from './site-publish.mjs';
+import { composedScreens, publishingChoices, publishingEnv, resolvePublishing, unlistedFindings, withoutCode } from './site-publish.mjs';
 
 const SCREEN = 'gts.frontx.mfes.ext.domain.v1~frontx.screensets.layout.screen.v1';
-const WIDGETS = 'gts.frontx.mfes.ext.domain.v1~frontx.widgets.area.main.v1';
 const ext = (name) => `ext.${name}`;
 
 let site;
@@ -35,24 +34,25 @@ afterEach(() => {
 });
 
 describe('publishingChoices and resolvePublishing', () => {
-  it('publishes everything when the config has no lists', () => {
-    expect(publishingChoices({})).toEqual({ unpublished: [], hiddenEntries: [] });
-    expect(resolvePublishing({ homeScreen: 'home' }, composedScreens(site).screens)).toEqual({ unpublished: [], hiddenEntries: [], hiddenScreens: [] });
+  it('lists everything when the config has no lists', () => {
+    expect(publishingChoices({})).toEqual({ unlisted: [], hiddenEntries: [] });
+    expect(resolvePublishing({ homeScreen: 'home' }, composedScreens(site).screens)).toEqual({ unlisted: [], hiddenEntries: [], hiddenScreens: [] });
   });
 
-  it('resolves unpublished tokens to their extension ids, reading screens with the scanner rules', () => {
+  it('resolves unlisted tokens to their extension ids, reading screens with the scanner rules', () => {
     const { domainKey, screens } = composedScreens(site);
     expect(domainKey).toBe('screen');
     expect(screens.map((screen) => screen.token)).toEqual(['demo-a', 'demo-b', 'home', 'kit']);
-    expect(resolvePublishing({ homeScreen: 'home', unpublishedScreens: ['kit', 'demo-b'], hiddenEntries: ['teams'] }, screens)).toEqual({ unpublished: ['kit', 'demo-b'], hiddenEntries: ['teams'], hiddenScreens: [ext('demo-b'), ext('kit')] });
+    expect(resolvePublishing({ homeScreen: 'home', unlistedScreens: ['kit', 'demo-b'], hiddenEntries: ['teams'] }, screens)).toEqual({ unlisted: ['kit', 'demo-b'], hiddenEntries: ['teams'], hiddenScreens: [ext('demo-b'), ext('kit')] });
   });
 
-  it('refuses a list of the wrong shape, an unknown token, the home screen and a footer screen', () => {
+  it('refuses a list of the wrong shape, an unknown token, the home screen, a footer screen and the former key', () => {
     const { screens } = composedScreens(site);
-    expect(() => publishingChoices({ unpublishedScreens: 'kit' })).toThrow('unpublishedScreens must be a list of non-empty strings');
-    expect(() => resolvePublishing({ homeScreen: 'home', unpublishedScreens: ['nope'] }, screens)).toThrow('names nope, which no composed screen declares');
-    expect(() => resolvePublishing({ homeScreen: 'home', unpublishedScreens: ['home'] }, screens)).toThrow('names the home screen home');
-    expect(() => resolvePublishing({ homeScreen: 'home', unpublishedScreens: ['kit'], footerScreens: ['kit'] }, screens)).toThrow('footerScreens links kit');
+    expect(() => publishingChoices({ unlistedScreens: 'kit' })).toThrow('unlistedScreens must be a list of non-empty strings');
+    expect(() => resolvePublishing({ homeScreen: 'home', unlistedScreens: ['nope'] }, screens)).toThrow('names nope, which no composed screen declares');
+    expect(() => resolvePublishing({ homeScreen: 'home', unlistedScreens: ['home'] }, screens)).toThrow('names the home screen home');
+    expect(() => resolvePublishing({ homeScreen: 'home', unlistedScreens: ['kit'], footerScreens: ['kit'] }, screens)).toThrow('footerScreens links kit');
+    expect(() => publishingChoices({ unpublishedScreens: ['kit'] })).toThrow('unpublishedScreens is now unlistedScreens');
   });
 
   it('carries the choices to the screens as JSON arrays in the build variables', () => {
@@ -60,68 +60,68 @@ describe('publishingChoices and resolvePublishing', () => {
   });
 });
 
-describe('publishedAggregate', () => {
-  const config = (id, extensions, domains) => ({ manifest: { id }, entries: extensions.map((extension) => ({ id: `${extension.id}.entry` })), extensions: extensions.map((extension) => ({ ...extension, entry: `${extension.id}.entry` })), ...(domains ? { domains: domains.map((domain) => ({ id: domain })) } : {}) });
-  const screen = (name) => ({ id: ext(name), domain: SCREEN });
-  const aggregate = () => [
-    config('m.home', [screen('home')]),
-    config('m.demo', [screen('demo-a'), screen('demo-b')], [WIDGETS]),
-    config('m.widget', [{ id: ext('widget'), domain: WIDGETS }]),
-    { manifest: { id: 'm.bare' }, entries: [], extensions: [] },
-  ];
-
-  it('keeps the aggregate when nothing is hidden', () => {
-    expect(publishedAggregate(aggregate(), [])).toEqual({ configs: aggregate(), dropped: [] });
-  });
-
-  it('keeps a remote with a published screen, without the hidden screen and its entry', () => {
-    const { configs, dropped } = publishedAggregate(aggregate(), [ext('demo-b')]);
-    expect(dropped).toEqual([]);
-    const demo = configs.find((item) => item.manifest.id === 'm.demo');
-    expect(demo.extensions.map((extension) => extension.id)).toEqual([ext('demo-a')]);
-    expect(demo.entries.map((entry) => entry.id)).toEqual([`${ext('demo-a')}.entry`]);
-  });
-
-  it('drops a remote whose every screen is hidden, then the remotes whose every extension sat in a domain only it declared, and keeps a remote that never had an extension', () => {
-    const { configs, dropped } = publishedAggregate(aggregate(), [ext('demo-a'), ext('demo-b')]);
-    expect(dropped).toEqual(['m.demo', 'm.widget']);
-    expect(configs.map((item) => item.manifest.id)).toEqual(['m.home', 'm.bare']);
-  });
-});
-
-describe('unpublishedFindings', () => {
-  const publishing = { unpublished: ['kit', 'demo-a', 'demo-b'], hiddenEntries: [], hiddenScreens: [ext('demo-a'), ext('demo-b'), ext('kit')] };
+describe('unlistedFindings', () => {
+  const publishing = { unlisted: ['kit', 'demo-a', 'demo-b'], hiddenEntries: [], hiddenScreens: [ext('demo-a'), ext('demo-b'), ext('kit')] };
   const outline = (entries) => ({ screen: 'home', strings: 'x', pages: [{ route: '/', title: 't', lead: 'l', entries }] });
+  const page = (address, indexable) => ({ address, indexable });
+  /** The page map template-site-meta inlines: every screen with its pages, the unlisted ones none of them indexable. */
+  const pageMap = (screens = {}) => ({
+    screens: {
+      home: { pages: { '/': page('/?screen=home', true) }, patterns: [] },
+      kit: { pages: { '/': page('/?screen=kit', false) }, patterns: [] },
+      'demo-a': { pages: { '/': page('/?screen=demo-a', false) }, patterns: [] },
+      'demo-b': { pages: { '/': page('/?screen=demo-b', false), '/week': page('/?screen=demo-b;route=week', false) }, patterns: [page('/?screen=demo-b;route=$id', false)] },
+      ...screens,
+    },
+  });
+  const documentWith = (map, body = '') => `<head><link rel="canonical" href="https://site.example/?screen=home" /><script type="application/json" id="site-meta-map">${JSON.stringify(map)}</script></head><body>${body}</body>`;
+  const registrations = (tokens) => [{ extensions: tokens.slice(0, 1).map((token) => ({ id: ext(token) })) }, { extensions: tokens.slice(1).map((token) => ({ id: ext(token) })) }];
   const clean = () => {
-    write('dist/index.html', '<script id="site-meta-map">{"home":{"address":"/?screen=home"}}</script>');
+    write('dist/index.html', documentWith(pageMap()));
     write('dist/sitemap.xml', '<loc>https://site.example/?screen=home</loc>');
     write('dist/home/index.md', '- [Home](https://site.example/?screen=home)\n\n```json\n{ "id": "ext.kit", "route": "/?screen=kit" }\n```\n');
-    write('dist/generated-mfe-manifests.json', [{ extensions: [{ id: ext('home') }] }]);
-    write('dist/mfe/home-mfe/remoteEntry.js', 'export {};');
+    write('dist/generated-mfe-manifests.json', registrations(['home', 'kit', 'demo-a', 'demo-b']));
+    for (const name of ['home-mfe', 'kit-mfe', 'demo-mfe']) write(`dist/mfe/${name}/remoteEntry.js`, 'export {};');
     write('dist/mfe/home-mfe/assets/chunk.js', `"${ext('kit')}"`);
     write('src-app/mfe_packages/home-mfe/src/content/outline.json', outline([{ type: 'card-tiles', items: [{ title: 'Kit', href: { extension: ext('kit') } }, { title: 'Docs', href: { url: 'https://docs.example/' } }] }]));
     write('src-app/mfe_packages/home-mfe/src/i18n/en.json', { title: 'Home', note: 'see ?screen=kitchen, another screen' });
+    // A demo's own navigation between two unlisted screens leads to no listed page.
+    write('src-app/mfe_packages/demo-mfe/src/nav.tsx', 'export const next = "?screen=demo-b";');
   };
-  const findings = () => unpublishedFindings(site, composedScreens(site), publishing);
+  const findings = () => unlistedFindings(site, composedScreens(site), publishing);
 
-  it('finds nothing in a build that carries no unpublished screen, a link the page prunes and a remote bundle aside', () => {
+  it('finds nothing in a build that lays out, registers and keeps noindex every unlisted screen, with a link the page prunes, a remote bundle, the page map and a link between two unlisted screens aside', () => {
     clean();
     expect(findings()).toEqual([]);
   });
 
-  it('turns red on a planted address in content, in a twin and in the page map, on a laid-out remote and on an aggregate entry', () => {
+  it('turns red on a planted address in content, in a twin, in the document outside its page map and in the sitemap, and on an id in the page manifest', () => {
     clean();
     write('src-app/mfe_packages/home-mfe/src/i18n/en.json', { title: 'Home', note: 'Open [the kit](?screen=kit;route=components/button).' });
     write('dist/home/index.md', '- [Kit](https://site.example/?screen=kit)');
-    write('dist/index.html', '<script id="site-meta-map">{"kit":{"address":"/?screen=demo-a"}}</script>');
-    write('dist/mfe/demo-mfe/remoteEntry.js', 'export {};');
-    write('dist/generated-mfe-manifests.json', [{ extensions: [{ id: ext('kit') }] }]);
+    write('dist/index.html', documentWith(pageMap(), '<a href="./?screen=demo-a">Demo</a>'));
+    write('dist/sitemap.xml', '<loc>https://site.example/?screen=demo-b</loc>');
+    write('dist/seo-manifest.json', { pages: { 'https://site.example/?screen=home': { screen: 'home', note: ext('kit') } } });
     expect(findings()).toEqual([
-      'dist/mfe/demo-mfe/ is laid out, but every screen of it is unpublished',
-      `dist/generated-mfe-manifests.json names the unpublished screen ${ext('kit')}`,
-      'dist/home/index.md links the unpublished screen kit (screen=kit)',
-      'dist/index.html links the unpublished screen demo-a (screen=demo-a)',
-      'home-mfe/src/i18n/en.json links the unpublished screen kit (screen=kit)',
+      'dist/home/index.md links the unlisted screen kit (screen=kit)',
+      'dist/index.html links the unlisted screen demo-a (screen=demo-a)',
+      `dist/seo-manifest.json names the unlisted screen ${ext('kit')}`,
+      'dist/sitemap.xml links the unlisted screen demo-b (screen=demo-b)',
+      'home-mfe/src/i18n/en.json links the unlisted screen kit (screen=kit)',
+    ]);
+  });
+
+  it('turns red on an unlisted screen without its remote or its registration, and on a page map that lets one of its pages be indexed or has none of them', () => {
+    clean();
+    rmSync(path.join(site, 'dist/mfe/kit-mfe'), { recursive: true });
+    write('dist/generated-mfe-manifests.json', registrations(['home', 'kit', 'demo-b']));
+    const screens = Object.entries(pageMap({ 'demo-b': { pages: { '/': page('/?screen=demo-b', false), '/week': page('/?screen=demo-b;route=week', true) }, patterns: [] } }).screens).filter(([token]) => token !== 'kit');
+    write('dist/index.html', documentWith({ screens: Object.fromEntries(screens) }));
+    expect(findings()).toEqual([
+      `dist/generated-mfe-manifests.json does not register the unlisted screen ${ext('demo-a')}, so its pages would not open`,
+      'dist/mfe/kit-mfe/ is missing, so the unlisted screen kit would not open',
+      'dist/index.html: the page map lets /?screen=demo-b;route=week of the unlisted screen demo-b be indexed; its robots meta needs noindex',
+      "dist/index.html: the page map has no pages of the unlisted screen kit, so they would take the site's head instead of their own",
     ]);
   });
 
@@ -132,8 +132,8 @@ describe('unpublishedFindings', () => {
     write('dist/docs/index.md', 'Text\n\n```md\n[link](https://site.example/?screen=home)\n');
     expect(findings()).toEqual([
       'dist/docs/index.md: a code fence opened on line 3 never closes; the check cannot tell its code from its links',
-      'dist/home/index.md links the unpublished screen kit (screen=kit)',
-      'home-mfe/src/i18n/en.json links the unpublished screen demo-a (screen=demo-a)',
+      'dist/home/index.md links the unlisted screen kit (screen=kit)',
+      'home-mfe/src/i18n/en.json links the unlisted screen demo-a (screen=demo-a)',
     ]);
   });
 
@@ -143,22 +143,22 @@ describe('unpublishedFindings', () => {
     write('src-app/app/layout/Header.test.tsx', 'expect(href).toBe("/?screen=kit");');
     write('src-app/mfe_packages/shared/site/content/links.ts', "export const demo = '?screen=demo-b;route=/';");
     expect(findings()).toEqual([
-      'src-app/app/layout/Header.tsx links the unpublished screen kit (screen=kit)',
-      'src-app/mfe_packages/shared/site/content/links.ts links the unpublished screen demo-b (screen=demo-b)',
+      'src-app/app/layout/Header.tsx links the unlisted screen kit (screen=kit)',
+      'src-app/mfe_packages/shared/site/content/links.ts links the unlisted screen demo-b (screen=demo-b)',
     ]);
   });
 
-  it("turns red on a literal address in a published screen's code, and leaves its tests aside", () => {
+  it("turns red on a literal address in a listed screen's code, and leaves its tests aside", () => {
     clean();
     write('src-app/mfe_packages/home-mfe/src/comp.tsx', 'export const href = "?screen=kit";');
     write('src-app/mfe_packages/home-mfe/src/comp.test.tsx', 'expect(href).toBe("?screen=kit");');
-    expect(findings()).toEqual(['home-mfe/src/comp.tsx links the unpublished screen kit (screen=kit)']);
+    expect(findings()).toEqual(['home-mfe/src/comp.tsx links the unlisted screen kit (screen=kit)']);
   });
 
   it('turns red on an outline link the pruning cannot take out', () => {
     clean();
     write('src-app/mfe_packages/home-mfe/src/content/outline.json', outline([{ type: 'custom', target: { extension: ext('kit') } }]));
-    expect(findings()).toEqual([`home-mfe/src/content/outline.json still links the unpublished screen ${ext('kit')} after pruning; the page would show the link`]);
+    expect(findings()).toEqual([`home-mfe/src/content/outline.json still links the unlisted screen ${ext('kit')} after pruning; the page would show the link`]);
   });
 });
 

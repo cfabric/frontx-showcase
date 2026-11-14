@@ -36,12 +36,12 @@ function escapeHtml(text: string): string {
 }
 // @cpt-end:cpt-template-site-meta-algo-seo-outputs-index-html:p1:inst-escape-html
 
-/** Every indexable page's canonical URL, screens in menu order; no `lastmod`, no pattern routes. */
+/** Every indexable page's canonical URL of the listed screens, screens in menu order; no `lastmod`, no pattern routes. */
 // @cpt-algo:cpt-template-site-meta-algo-seo-outputs-sitemap-robots:p1
 // @cpt-dod:cpt-template-site-meta-dod-seo-outputs-discovery-files:p1
 export function renderSitemap(map: SiteMetaMap): string {
   // @cpt-begin:cpt-template-site-meta-algo-seo-outputs-sitemap-robots:p1:inst-indexable-urls
-  const urls = staticPages(map)
+  const urls = staticPages(map, { listed: true })
     .filter((page) => page.indexable)
     .map((page) => `  <url>\n    <loc>${escapeXml(page.canonical)}</loc>\n  </url>`);
   // @cpt-end:cpt-template-site-meta-algo-seo-outputs-sitemap-robots:p1:inst-indexable-urls
@@ -80,7 +80,7 @@ function linkLine(page: PageMeta): string {
 // @cpt-end:cpt-template-site-meta-algo-seo-outputs-llms:p1:inst-page-line
 
 /**
- * `llms.txt` (the llmstxt.org shape): the site name, its summary, one section per screen in menu order with each indexable page linked by its canonical URL and described; a screen's pages under a common first path segment (`/components/...`) are grouped under that segment; then the plain-text twins of the outline pages, then the published `llms.txt` of the packages the site documents, then the sections the site config adds.
+ * `llms.txt` (the llmstxt.org shape): the site name, its summary, one section per listed screen in menu order with each indexable page linked by its canonical URL and described; a screen's pages under a common first path segment (`/components/...`) are grouped under that segment; then the plain-text twins of the outline pages, then the published `llms.txt` of the packages the site documents, then the sections the site config adds.
  * @param map - the site's page map
  * @param summary - the site summary (`defaultDescription`)
  * @param packages - published package `llms.txt` files to link
@@ -93,7 +93,9 @@ export function renderLlms(map: SiteMetaMap, summary: string, packages: readonly
   const lines = [`# ${map.siteName}`, '', `> ${summary}`, ''];
   // @cpt-end:cpt-template-site-meta-algo-seo-outputs-llms:p1:inst-header
   // @cpt-begin:cpt-template-site-meta-algo-seo-outputs-llms:p1:inst-screens-in-order
-  const screens = Object.values(map.screens).sort((a, b) => a.order - b.order);
+  const screens = Object.values(map.screens)
+    .filter((screen) => !screen.unlisted)
+    .sort((a, b) => a.order - b.order);
   // @cpt-end:cpt-template-site-meta-algo-seo-outputs-llms:p1:inst-screens-in-order
   // @cpt-begin:cpt-template-site-meta-algo-seo-outputs-llms:p1:inst-foreach-screen
   for (const screen of screens) {
@@ -153,7 +155,7 @@ export function renderLlms(map: SiteMetaMap, summary: string, packages: readonly
   // @cpt-end:cpt-template-site-meta-algo-seo-outputs-llms:p1:inst-return-llms
 }
 
-/** The resolved page map as a file: site fields with the build's indexing, every page with an address keyed by its canonical URL, and the pattern routes. */
+/** The resolved page map as a file: site fields with the build's indexing, every page of a listed screen with an address keyed by its canonical URL, and their pattern routes; the unlisted screens are not listed here. */
 // @cpt-algo:cpt-template-site-meta-algo-seo-outputs-seo-manifest:p1
 export function renderSeoManifest(map: SiteMetaMap, indexing: Indexing = 'on'): string {
   // @cpt-begin:cpt-template-site-meta-algo-seo-outputs-seo-manifest:p1:inst-share-fields
@@ -180,10 +182,11 @@ export function renderSeoManifest(map: SiteMetaMap, indexing: Indexing = 'on'): 
   });
   // @cpt-end:cpt-template-site-meta-algo-seo-outputs-seo-manifest:p1:inst-page-entry
   // @cpt-begin:cpt-template-site-meta-algo-seo-outputs-seo-manifest:p1:inst-pages-by-canonical
-  const pages = Object.fromEntries(staticPages(map).map((page) => [page.canonical, entry(page)]));
+  const pages = Object.fromEntries(staticPages(map, { listed: true }).map((page) => [page.canonical, entry(page)]));
   // @cpt-end:cpt-template-site-meta-algo-seo-outputs-seo-manifest:p1:inst-pages-by-canonical
   // @cpt-begin:cpt-template-site-meta-algo-seo-outputs-seo-manifest:p1:inst-patterns-apart
   const patterns = Object.values(map.screens)
+    .filter((screen) => !screen.unlisted)
     .sort((a, b) => a.order - b.order)
     .flatMap((screen) => screen.patterns)
     .map((page) => ({ addressPattern: page.address.replace(/%24/g, '$'), screen: page.screen, route: page.route, title: page.title, documentTitle: page.documentTitle, description: page.description, indexable: page.indexable }));

@@ -24,10 +24,10 @@ vi.mock('./Menu', () => ({
     return null;
   },
 }));
-vi.mock('./site', async (importOriginal) => ({ ...(await importOriginal<Record<string, never>>()), SITE_LANGUAGES: ['en'], HEADER_HIDDEN_GROUPS: ['demos'] }));
+vi.mock('./site', async (importOriginal) => ({ ...(await importOriginal<Record<string, never>>()), SITE_LANGUAGES: ['en'], HEADER_HIDDEN_GROUPS: ['demos'], UNLISTED_SCREENS: ['ext.kit', 'ext.blocks', 'ext.lone'] }));
 
 const groupId = (name: string) => `gts.frontx.screensets.layout.nav_group.v1~fixture.site.layout.${name}.v1`;
-const GROUPS: ReadonlyMap<string, string> = new Map([[groupId('demos'), 'demos']]);
+const GROUPS: ReadonlyMap<string, string> = new Map(['demos', 'tools', 'solo'].map((name) => [groupId(name), name]));
 /** A screen extension; one with a group names the group's instance id, as its package declares it. */
 const screenOf = (name: string, route: string, order: number, group?: string): NavigableScreen => ({ id: name, route, presentation: { label: name, order, ...(group ? { group: groupId(group) } : {}) } });
 const buildNavigation = (screens: readonly NavigableScreen[], domainKey: string, activeId: string | undefined) => buildNavigationWith(screens, domainKey, activeId, GROUPS);
@@ -64,5 +64,20 @@ describe('Header', () => {
     const entries = buildNavigation([screenOf('ext.home', '/home', 10), screenOf('ext.mail', '/mail', 61, 'demos'), screenOf('ext.libs', '/libs', 35)], 'screen', undefined);
     render(<Header entries={entries} onOpen={vi.fn()} />);
     expect((menuEntries.last as { id: string }[]).map((entry) => entry.id)).toEqual(['ext.home', 'ext.libs']);
+  });
+
+  it('hands the menu no unlisted screen of the build, inside a group neither, and no group they empty', () => {
+    const entries = buildNavigation(
+      [screenOf('ext.home', '/home', 10), screenOf('ext.kit', '/kit', 20), screenOf('ext.blocks', '/blocks', 30, 'tools'), screenOf('ext.calendar', '/calendar', 31, 'tools'), screenOf('ext.lone', '/lone', 40, 'solo')],
+      'screen',
+      'ext.blocks'
+    );
+    render(<Header entries={entries} onOpen={vi.fn()} />);
+    const shown = menuEntries.last as { id: string; active: boolean; items?: { id: string }[] }[];
+    expect(shown.map((entry) => [entry.id, entry.items?.map((item) => item.id)])).toEqual([
+      ['ext.home', undefined],
+      ['tools', ['ext.calendar']],
+    ]);
+    expect(shown.find((entry) => entry.id === 'tools')?.active).toBe(false);
   });
 });
