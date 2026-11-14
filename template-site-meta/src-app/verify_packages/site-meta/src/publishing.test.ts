@@ -225,6 +225,31 @@ describe('the twin record', () => {
     expect(await check({ paths })).toEqual({ errors: [], compared: true });
   });
 
+  it('never removes a recorded file reached through a linked folder that leads out of dist/', async () => {
+    const paths = makeProject(roots);
+    await generate({ paths }, { SITE_ORIGIN: ORIGIN });
+    write(path.join(paths.project, 'elsewhere', 'x.md'), 'outside dist\n');
+    fs.symlinkSync(path.join(paths.project, 'elsewhere'), path.join(paths.dist, 'linked'));
+    plant(paths, ['linked/x.md']);
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    await generate({ paths }, { SITE_ORIGIN: ORIGIN });
+    warn.mockRestore();
+    expect(fs.existsSync(path.join(paths.project, 'elsewhere', 'x.md'))).toBe(true);
+  });
+
+  it('skips a record entry the file system cannot take, with a warning, and still generates', async () => {
+    const paths = makeProject(roots);
+    await generate({ paths }, { SITE_ORIGIN: ORIGIN });
+    const record = JSON.parse(fs.readFileSync(recordFile(paths), 'utf8')) as { twins: Record<string, string> };
+    record.twins['demo/\u0000.md'] = 'a'.repeat(64);
+    fs.writeFileSync(recordFile(paths), JSON.stringify(record));
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    await generate({ paths }, { SITE_ORIGIN: ORIGIN });
+    expect(warn.mock.calls.map((call) => String(call[0]))).toEqual([expect.stringContaining('skips the record entry')]);
+    warn.mockRestore();
+    expect(fs.existsSync(path.join(paths.dist, 'demo', 'index.md'))).toBe(true);
+  });
+
   it('removes nothing on a malformed record, warns about it, and still generates', async () => {
     const paths = makeProject(roots);
     await generate({ paths }, { SITE_ORIGIN: ORIGIN });

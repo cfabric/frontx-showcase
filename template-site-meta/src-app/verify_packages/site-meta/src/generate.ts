@@ -284,23 +284,33 @@ export function readTwinRecord(paths: SitePaths): TwinRecord {
 }
 
 /**
- * The twins in `dist/` the outputs do not hold: the recorded twins the sources no longer generate (a screen that became unlisted or left the composition, a page that went) that are still regular files there with the very content the generator wrote. A Markdown file the generator never wrote, or one authored later at a former twin path, is left alone; so is a link, whatever it points to.
+ * The twins in `dist/` the outputs do not hold: the recorded twins the sources no longer generate (a screen that became unlisted or left the composition, a page that went) that are still regular files there with the very content the generator wrote. A Markdown file the generator never wrote, or one authored later at a former twin path, is left alone; so is a link, whatever it points to, and a file reached through a linked folder that leads out of `dist/`. An entry the file system cannot take (a NUL in its path) is skipped with a warning, so it cannot abort the run.
  * @param paths - the project
  * @param outputs - the outputs the sources generate now, keyed by their path in `dist/`
  */
-export function staleTwins(paths: SitePaths, outputs: Readonly<Record<string, string>>): { files: string[]; warning?: string } {
+export function staleTwins(paths: SitePaths, outputs: Readonly<Record<string, string>>): { files: string[]; warnings: string[] } {
   // @cpt-begin:cpt-template-site-meta-algo-generate-and-check-stale-twins:p2:inst-return-stale
   const record = readTwinRecord(paths);
-  const files = Object.entries(record.twins)
-    .filter(([file, hash]) => {
-      if (Object.hasOwn(outputs, file)) return false;
-      const target = path.resolve(paths.dist, ...file.split('/'));
+  const warnings = record.warning ? [record.warning] : [];
+  const files: string[] = [];
+  // The real path of each entry must stay inside the real path of dist/, so a link anywhere on the way (the file or a parent folder) cannot lead the removal out of it. A swap between this check and the removal is outside what a local build step that owns dist/ defends against, so the removal goes by path, not by file handle.
+  const realDist = fs.existsSync(paths.dist) ? fs.realpathSync(paths.dist) : undefined;
+  for (const [file, hash] of Object.entries(record.twins)) {
+    if (Object.hasOwn(outputs, file) || realDist === undefined) continue;
+    const target = path.resolve(paths.dist, ...file.split('/'));
+    try {
       const stat = fs.lstatSync(target, { throwIfNoEntry: false });
-      return stat !== undefined && stat.isFile() && digest(fs.readFileSync(target)) === hash;
-    })
-    .map(([file]) => file)
-    .sort();
-  return { files, ...(record.warning ? { warning: record.warning } : {}) };
+      if (stat === undefined || !stat.isFile()) continue;
+      if (!fs.realpathSync(target).startsWith(`${realDist}${path.sep}`)) {
+        warnings.push(`site-meta: skips the record entry ${JSON.stringify(file)}: it leads out of dist/ through a link`);
+        continue;
+      }
+      if (digest(fs.readFileSync(target)) === hash) files.push(file);
+    } catch (error) {
+      warnings.push(`site-meta: skips the record entry ${JSON.stringify(file)}: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+  return { files: files.sort(), warnings };
   // @cpt-end:cpt-template-site-meta-algo-generate-and-check-stale-twins:p2:inst-return-stale
 }
 
@@ -381,7 +391,7 @@ export async function generate(run: RunOptions, env: Readonly<Record<string, str
   // @cpt-begin:cpt-template-site-meta-flow-generate-and-check-generate:p1:inst-remove-stale-twins
   // A twin an earlier generation wrote goes when the sources no longer generate it, the way llms.txt goes above.
   const stale = staleTwins(paths, outputs);
-  if (stale.warning) console.warn(stale.warning);
+  for (const warning of stale.warnings) console.warn(warning);
   for (const file of stale.files) fs.rmSync(path.resolve(paths.dist, ...file.split('/')));
   // @cpt-end:cpt-template-site-meta-flow-generate-and-check-generate:p1:inst-remove-stale-twins
   // @cpt-begin:cpt-template-site-meta-flow-generate-and-check-generate:p1:inst-write-outputs
@@ -442,7 +452,7 @@ export async function check(run: RunOptions): Promise<{ errors: string[]; compar
       }
       // @cpt-begin:cpt-template-site-meta-flow-generate-and-check-check:p1:inst-if-stale-twins
       const stale = staleTwins(paths, outputs);
-      if (stale.warning) console.warn(stale.warning);
+      for (const warning of stale.warnings) console.warn(warning);
       for (const file of stale.files) errors.push(`${shown(paths, path.join(paths.dist, file))} is a twin the sources no longer generate; run npm run seo:generate`);
       // @cpt-end:cpt-template-site-meta-flow-generate-and-check-check:p1:inst-if-stale-twins
     }
