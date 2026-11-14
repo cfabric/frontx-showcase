@@ -145,6 +145,13 @@ describe('unlistedFindings', () => {
     ]);
   });
 
+  it('turns red on an unlisted screen whose entry declaration is gone while its extension stays registered', () => {
+    clean();
+    const configs = registrations(['home', 'kit', 'demo-a', 'demo-b']).map((config) => ({ ...config, entries: config.entries.filter((entry) => entry.id !== `${ext('kit')}.entry`) }));
+    write('dist/generated-mfe-manifests.json', configs);
+    expect(findings()).toEqual([`dist/generated-mfe-manifests.json declares no entry ${ext('kit')}.entry for the unlisted screen ${ext('kit')}, so its pages would not open`]);
+  });
+
   it('turns red on a page map that leaves out an inner route or a pattern route an unlisted screen declares', () => {
     clean();
     write('dist/index.html', documentWith(pageMap({ 'demo-b': { pages: { '/': page('/?screen=demo-b', false) }, patterns: [] } })));
