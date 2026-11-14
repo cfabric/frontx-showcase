@@ -108,20 +108,22 @@ export function publishingEnv(publishing) {
 const MFE_DIR = 'mfe';
 
 /**
- * The remote entry file a registered screen loads, as a path in dist/: the `publicPath` of the manifest its entry names (or of its config's manifest) joined with the manifest's `remoteEntry` path and name, the way the MFE handler resolves it against the aggregate. Undefined when the manifest gives no relative address under `mfe/`.
+ * The remote entry file a registered screen loads, as a path in dist/, or why there is none. The screen's extension names its entry, which the config must declare; the entry's manifest is the object it carries, or the config's manifest when the entry references that one by id. The file is the manifest's `publicPath` joined with its `remoteEntry` path and name, the way the MFE handler resolves it against the aggregate, and must sit under `mfe/`.
  * @param {object} config - the aggregate config that registers the screen
  * @param {string} extensionId - the screen's extension id
- * @returns {string | undefined}
+ * @returns {{ file: string } | { problem: string }}
  */
 export function remoteEntryFile(config, extensionId) {
   const extension = (config.extensions ?? []).find((candidate) => candidate.id === extensionId);
-  const entryManifest = (config.entries ?? []).find((candidate) => candidate.id === extension?.entry)?.manifest;
-  const metaData = (entryManifest && typeof entryManifest === 'object' && entryManifest.metaData ? entryManifest : config.manifest)?.metaData;
-  const publicPath = metaData?.publicPath;
-  const remoteEntry = metaData?.remoteEntry;
-  if (typeof publicPath !== 'string' || typeof remoteEntry?.name !== 'string' || remoteEntry.name === '') return undefined;
+  const entry = (config.entries ?? []).find((candidate) => candidate.id === extension?.entry);
+  if (!entry) return { problem: `declares no entry ${extension?.entry ?? '(none named)'} for the unlisted screen ${extensionId}` };
+  const manifest = typeof entry.manifest === 'object' && entry.manifest !== null ? entry.manifest : entry.manifest === config.manifest?.id ? config.manifest : undefined;
+  if (!manifest) return { problem: `gives the entry ${entry.id} of the unlisted screen ${extensionId} no manifest it carries or its config's manifest names` };
+  const publicPath = manifest.metaData?.publicPath;
+  const remoteEntry = manifest.metaData?.remoteEntry;
+  if (typeof publicPath !== 'string' || typeof remoteEntry?.name !== 'string' || remoteEntry.name === '') return { problem: `gives the unlisted screen ${extensionId} no remote entry address` };
   const file = path.posix.normalize([publicPath, remoteEntry.path ?? '', remoteEntry.name].filter(Boolean).join('/'));
-  return file.startsWith(`${MFE_DIR}/`) ? file : undefined;
+  return file.startsWith(`${MFE_DIR}/`) ? { file } : { problem: `gives the unlisted screen ${extensionId} the remote entry ${file}, which is not under ${MFE_DIR}/` };
 }
 
 /**
@@ -198,8 +200,8 @@ export function unlistedFindings(siteDir, composed, publishing) {
       continue;
     }
     const entry = remoteEntryFile(config, screen.id);
-    if (entry === undefined) findings.push(`dist/${AGGREGATE_FILE} gives the unlisted screen ${screen.id} no relative remote entry under ${MFE_DIR}/, so its pages would not open`);
-    else if (!fs.existsSync(path.join(distDir, ...entry.split('/')))) findings.push(`dist/${entry} is missing, so the unlisted screen ${screen.token} would not open`);
+    if ('problem' in entry) findings.push(`dist/${AGGREGATE_FILE} ${entry.problem}, so its pages would not open`);
+    else if (!fs.existsSync(path.join(distDir, ...entry.file.split('/')))) findings.push(`dist/${entry.file} is missing, so the unlisted screen ${screen.token} would not open`);
   }
   // @cpt-end:cpt-site-algo-production-build-layout-check-links:p2:inst-check-remotes
   // @cpt-begin:cpt-site-algo-production-build-layout-check-links:p2:inst-check-outputs
