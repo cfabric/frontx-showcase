@@ -239,8 +239,8 @@ export function unlistedScreens(config: SiteConfig, extensions: readonly ScreenE
   if (unlisted.has(config.homeScreen)) throw new Error(`site.config.json.unlistedScreens names the home screen "${config.homeScreen}"`);
   // @cpt-end:cpt-template-site-meta-algo-page-map-published-screens:p1:inst-if-home-unlisted
   // @cpt-begin:cpt-template-site-meta-algo-page-map-published-screens:p1:inst-return-split
-  const listed = extensions.filter((extension) => unlisted.has(screenToken(extension)));
-  return { unlisted: listed.map(screenToken), hiddenScreens: listed.map((extension) => extension.id) };
+  const unlistedExtensions = extensions.filter((extension) => unlisted.has(screenToken(extension)));
+  return { unlisted: unlistedExtensions.map(screenToken), hiddenScreens: unlistedExtensions.map((extension) => extension.id) };
   // @cpt-end:cpt-template-site-meta-algo-page-map-published-screens:p1:inst-return-split
 }
 

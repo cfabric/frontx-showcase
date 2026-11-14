@@ -111,16 +111,17 @@ describe('unlistedScreens', () => {
     expect(await check({ paths })).toEqual({ errors: [], compared: true });
   });
 
-  it('removes the twins an earlier generation wrote once their screen is unlisted, keeps Markdown in the code folders, and check reports a twin planted back', async () => {
+  it('removes the twins an earlier generation wrote once their screen is unlisted, keeps every Markdown file that is no twin, and check reports a twin planted back', async () => {
     const paths = makeProject(roots);
     await generate({ paths }, { SITE_ORIGIN: ORIGIN });
     expect(fs.existsSync(path.join(paths.dist, 'demo', 'index.md'))).toBe(true);
-    write(path.join(paths.dist, 'assets', 'notes.md'), 'built asset\n');
-    write(path.join(paths.dist, 'mfe', 'demo-mfe', 'README.md'), 'remote file\n');
+    // Hand-written Markdown the host's public folder ships, and a remote's file: no twin path names them.
+    const kept = ['notes.md', 'guides/setup.md', 'assets/notes.md', 'mfe/demo-mfe/README.md'];
+    for (const file of kept) write(path.join(paths.dist, file), 'not a twin\n');
     write(paths.config, { ...CONFIG, unlistedScreens: ['demo'] });
     await generate({ paths }, { SITE_ORIGIN: ORIGIN });
     expect(['demo/index.md', 'demo/week.md'].filter((file) => fs.existsSync(path.join(paths.dist, file)))).toEqual([]);
-    expect(['assets/notes.md', 'mfe/demo-mfe/README.md'].filter((file) => fs.existsSync(path.join(paths.dist, file)))).toEqual(['assets/notes.md', 'mfe/demo-mfe/README.md']);
+    expect(kept.filter((file) => fs.existsSync(path.join(paths.dist, file)))).toEqual(kept);
     expect(await check({ paths })).toEqual({ errors: [], compared: true });
     write(path.join(paths.dist, 'demo', 'index.md'), 'left by an earlier generation\n');
     expect((await check({ paths })).errors).toEqual(['dist/demo/index.md is a twin the sources no longer generate; run npm run seo:generate']);
@@ -133,6 +134,12 @@ describe('unlistedScreens', () => {
     expect(read(paths, 'sitemap.xml')).toContain(`<loc>${ORIGIN}/?screen=demo</loc>`);
     expect(read(paths, 'home/index.md')).toContain(`[Demo](${ORIGIN}/?screen=demo)`);
     expect(read(paths, 'home/index.md')).toContain('Teams');
+  });
+
+  it('refuses the former key unpublishedScreens instead of listing every screen', async () => {
+    const paths = makeProject(roots);
+    write(paths.config, { ...CONFIG, unpublishedScreens: ['demo'] });
+    await expect(generate({ paths }, { SITE_ORIGIN: ORIGIN })).rejects.toThrow('site.config.json: unpublishedScreens is now unlistedScreens');
   });
 
   it('refuses a token no screen declares, the home screen, and a list that is not one of strings', async () => {

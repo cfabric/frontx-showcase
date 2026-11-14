@@ -1,7 +1,7 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { composedScreens, publishingChoices, publishingEnv, resolvePublishing, unlistedFindings, withoutCode } from './site-publish.mjs';
 
 const SCREEN = 'gts.frontx.mfes.ext.domain.v1~frontx.screensets.layout.screen.v1';
@@ -57,6 +57,18 @@ describe('publishingChoices and resolvePublishing', () => {
 
   it('carries the choices to the screens as JSON arrays in the build variables', () => {
     expect(publishingEnv({ hiddenScreens: [ext('kit')], hiddenEntries: [] })).toEqual({ VITE_SITE_HIDDEN_SCREENS: '["ext.kit"]', VITE_SITE_HIDDEN_ENTRIES: '[]' });
+  });
+
+  it("reaches the shell's header: the build variables it writes are the ones the header's site choices read", async () => {
+    for (const [name, value] of Object.entries(publishingEnv({ hiddenScreens: [ext('kit'), ext('demo-a')], hiddenEntries: [] }))) vi.stubEnv(name, value);
+    vi.resetModules();
+    try {
+      // Imported by path, as verify-ui reads the composed site-meta: the shell's module is the site's to type-check, not the repository's.
+      const { UNLISTED_SCREENS } = await import(path.join(import.meta.dirname, '..', 'site', 'src-app', 'app', 'layout', 'site.ts'));
+      expect(UNLISTED_SCREENS).toEqual([ext('kit'), ext('demo-a')]);
+    } finally {
+      vi.unstubAllEnvs();
+    }
   });
 });
 
