@@ -1,6 +1,7 @@
 /**
  * Generation and checking over a project: resolves the page map from the sources and writes or compares the outputs in the project's `dist/`.
  */
+import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -240,43 +241,82 @@ export function missingAssets(paths: SitePaths, map: SiteMetaMap, indexHtml: str
  */
 // @cpt-begin:cpt-template-site-meta-algo-generate-and-check-stale-twins:p2:inst-record-place
 export const TWIN_RECORD = path.join('node_modules', '.cache', 'site-meta', 'twins.json');
+const TWIN_RECORD_SHOWN = 'node_modules/.cache/site-meta/twins.json';
+const TWIN_RECORD_VERSION = 1;
 // @cpt-end:cpt-template-site-meta-algo-generate-and-check-stale-twins:p2:inst-record-place
 
-/** The twins the generations of a project wrote, by their path in `dist/`; none when there is no record yet (the first run) or the record is not a list of paths. */
+/** The sha256 of a twin's content, as the record keeps it. */
+const digest = (content: string | Buffer): string => createHash('sha256').update(content).digest('hex');
+
+/** Whether a record entry can name a twin: a relative, normalized Markdown path that stays inside `dist/`. */
+function isTwinPath(paths: SitePaths, file: string): boolean {
+  if (!file.endsWith('.md') || file.includes('\\') || path.posix.isAbsolute(file) || path.isAbsolute(file) || path.posix.normalize(file) !== file) return false;
+  if (file.split('/').some((segment) => segment === '..' || segment === '.' || segment === '')) return false;
+  const dist = path.resolve(paths.dist);
+  return path.resolve(dist, ...file.split('/')).startsWith(`${dist}${path.sep}`);
+}
+
+/** The record of the twins the generations of a project wrote: each twin's path in `dist/` with the sha256 of the content written there. */
+export interface TwinRecord {
+  readonly twins: Readonly<Record<string, string>>;
+  /** Set when a record exists but is not one this generator wrote (not JSON, another shape): no twin is removed or reported on it. */
+  readonly warning?: string;
+}
+
+/** The record; empty when there is none yet (the first run). An entry that is not a twin path inside `dist/` with a sha256 is dropped. */
 // @cpt-algo:cpt-template-site-meta-algo-generate-and-check-stale-twins:p2
-export function recordedTwins(paths: SitePaths): string[] {
+export function readTwinRecord(paths: SitePaths): TwinRecord {
   // @cpt-begin:cpt-template-site-meta-algo-generate-and-check-stale-twins:p2:inst-read-record
   const file = path.join(paths.project, TWIN_RECORD);
-  if (!fs.existsSync(file)) return [];
-  const value: unknown = readJson(file);
-  return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : [];
+  if (!fs.existsSync(file)) return { twins: {} };
+  const malformed = { twins: {}, warning: `site-meta: the twin record ${TWIN_RECORD_SHOWN} is not one this generator wrote; no twin is removed, and the next generation writes a new record` };
+  let value: unknown;
+  try {
+    value = JSON.parse(fs.readFileSync(file, 'utf8'));
+  } catch {
+    return malformed;
+  }
+  const record = typeof value === 'object' && value !== null && !Array.isArray(value) ? (value as { version?: unknown; twins?: unknown }) : undefined;
+  if (record?.version !== TWIN_RECORD_VERSION || typeof record.twins !== 'object' || record.twins === null || Array.isArray(record.twins)) return malformed;
+  const twins = Object.fromEntries(Object.entries(record.twins).filter((entry): entry is [string, string] => typeof entry[1] === 'string' && /^[0-9a-f]{64}$/.test(entry[1]) && isTwinPath(paths, entry[0])));
+  return { twins };
   // @cpt-end:cpt-template-site-meta-algo-generate-and-check-stale-twins:p2:inst-read-record
 }
 
 /**
- * The twins in `dist/` the outputs do not hold: the recorded twins that are still there and that the sources no longer generate (a screen that became unlisted or left the composition, a page that went). Only what a generation wrote counts, so a Markdown file the generator never wrote (a page the host's public folder ships, a remote's file) is left alone, wherever it sits.
+ * The twins in `dist/` the outputs do not hold: the recorded twins the sources no longer generate (a screen that became unlisted or left the composition, a page that went) that are still regular files there with the very content the generator wrote. A Markdown file the generator never wrote, or one authored later at a former twin path, is left alone; so is a link, whatever it points to.
  * @param paths - the project
  * @param outputs - the outputs the sources generate now, keyed by their path in `dist/`
  */
-export function staleTwins(paths: SitePaths, outputs: Readonly<Record<string, string>>): string[] {
+export function staleTwins(paths: SitePaths, outputs: Readonly<Record<string, string>>): { files: string[]; warning?: string } {
   // @cpt-begin:cpt-template-site-meta-algo-generate-and-check-stale-twins:p2:inst-return-stale
-  return recordedTwins(paths)
-    .filter((file) => !Object.hasOwn(outputs, file) && fs.existsSync(path.join(paths.dist, ...file.split('/'))))
+  const record = readTwinRecord(paths);
+  const files = Object.entries(record.twins)
+    .filter(([file, hash]) => {
+      if (Object.hasOwn(outputs, file)) return false;
+      const target = path.resolve(paths.dist, ...file.split('/'));
+      const stat = fs.lstatSync(target, { throwIfNoEntry: false });
+      return stat !== undefined && stat.isFile() && digest(fs.readFileSync(target)) === hash;
+    })
+    .map(([file]) => file)
     .sort();
+  return { files, ...(record.warning ? { warning: record.warning } : {}) };
   // @cpt-end:cpt-template-site-meta-algo-generate-and-check-stale-twins:p2:inst-return-stale
 }
 
 /**
- * Records the twins this generation wrote, with every twin an earlier generation recorded, so a twin planted back later is still known as one.
+ * Records the twins this generation wrote, with the sha256 of each, together with every twin an earlier generation recorded, so a twin planted back later is still known as one.
  * @param paths - the project
  * @param outputs - the outputs just written, keyed by their path in `dist/`; the twins are the Markdown ones
  */
 export function recordTwins(paths: SitePaths, outputs: Readonly<Record<string, string>>): void {
   // @cpt-begin:cpt-template-site-meta-algo-generate-and-check-stale-twins:p2:inst-write-record
-  const twins = new Set([...recordedTwins(paths), ...Object.keys(outputs).filter((file) => file.endsWith('.md'))]);
+  const twins: Record<string, string> = { ...readTwinRecord(paths).twins };
+  for (const [name, content] of Object.entries(outputs)) if (name.endsWith('.md')) twins[name] = digest(content);
+  const sorted = Object.fromEntries(Object.entries(twins).sort(([a], [b]) => a.localeCompare(b)));
   const file = path.join(paths.project, TWIN_RECORD);
   fs.mkdirSync(path.dirname(file), { recursive: true });
-  fs.writeFileSync(file, `${JSON.stringify([...twins].sort(), null, 2)}\n`);
+  fs.writeFileSync(file, `${JSON.stringify({ version: TWIN_RECORD_VERSION, twins: sorted }, null, 2)}\n`);
   // @cpt-end:cpt-template-site-meta-algo-generate-and-check-stale-twins:p2:inst-write-record
 }
 
@@ -340,7 +380,9 @@ export async function generate(run: RunOptions, env: Readonly<Record<string, str
   // @cpt-end:cpt-template-site-meta-flow-generate-and-check-generate:p1:inst-if-indexing-off
   // @cpt-begin:cpt-template-site-meta-flow-generate-and-check-generate:p1:inst-remove-stale-twins
   // A twin an earlier generation wrote goes when the sources no longer generate it, the way llms.txt goes above.
-  for (const file of staleTwins(paths, outputs)) fs.rmSync(path.join(paths.dist, file));
+  const stale = staleTwins(paths, outputs);
+  if (stale.warning) console.warn(stale.warning);
+  for (const file of stale.files) fs.rmSync(path.resolve(paths.dist, ...file.split('/')));
   // @cpt-end:cpt-template-site-meta-flow-generate-and-check-generate:p1:inst-remove-stale-twins
   // @cpt-begin:cpt-template-site-meta-flow-generate-and-check-generate:p1:inst-write-outputs
   for (const [name, content] of Object.entries(outputs)) {
@@ -399,7 +441,9 @@ export async function check(run: RunOptions): Promise<{ errors: string[]; compar
         if (!fs.existsSync(file) || fs.readFileSync(file, 'utf8') !== content) errors.push(`${shown(paths, file)} differs from what the sources generate; run npm run seo:generate`);
       }
       // @cpt-begin:cpt-template-site-meta-flow-generate-and-check-check:p1:inst-if-stale-twins
-      for (const file of staleTwins(paths, outputs)) errors.push(`${shown(paths, path.join(paths.dist, file))} is a twin the sources no longer generate; run npm run seo:generate`);
+      const stale = staleTwins(paths, outputs);
+      if (stale.warning) console.warn(stale.warning);
+      for (const file of stale.files) errors.push(`${shown(paths, path.join(paths.dist, file))} is a twin the sources no longer generate; run npm run seo:generate`);
       // @cpt-end:cpt-template-site-meta-flow-generate-and-check-check:p1:inst-if-stale-twins
     }
     // @cpt-end:cpt-template-site-meta-flow-generate-and-check-check:p1:inst-compare-outputs
