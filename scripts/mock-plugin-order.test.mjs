@@ -37,10 +37,11 @@ describe('mock() before queryCacheShared()', () => {
     expect(sharedCacheBeforeMock('a.use(queryCacheShared()).build(); b.use(mock()).build();')).toEqual([]);
   });
 
+  // Reads every source file of every template screen package (about 500): 0.1 to 3 s alone, up to 9 s when the full suite reads files side by side.
   it('holds in every screen package of the templates', () => {
     const files = findTemplateDirs(ROOT).flatMap((dir) => sources(path.join(dir, 'src-app/mfe_packages')));
     expect(files.length).toBeGreaterThan(0);
     const offenders = files.filter((file) => sharedCacheBeforeMock(fs.readFileSync(file, 'utf8')).length > 0).map((file) => path.relative(ROOT, file));
     expect(offenders).toEqual([]);
-  });
+  }, 30_000);
 });
