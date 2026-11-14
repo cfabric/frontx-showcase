@@ -124,7 +124,7 @@ jobs:
     - name: Compose and install the site
       run: npm run setup
 
-    # The routes come from the built seo-manifest.json.
+    # verify:ui takes its routes from the page map scripts/verify-ui.mjs builds from the composed sources, not from this build's seo-manifest.json, which leaves the unlisted screens out.
     - name: Build the site
       run: npm run build
 
