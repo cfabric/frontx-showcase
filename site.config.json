@@ -24,7 +24,7 @@
     {
       "heading": "Build and run this site",
       "items": [
-        "Source: [constructorfabric/frontx-showcase](https://github.com/constructorfabric/frontx-showcase); Node 24.14 or later, npm 10.",
+        "Source: [cfabric/frontx-showcase](https://github.com/cfabric/frontx-showcase); Node 24.14 or later, npm 10.",
         "Install: `npm ci`, then `npm run setup` (composes the templates into `site/` and installs the site).",
         "Develop: `npm run dev` serves the site at http://localhost:5173/.",
         "Build: `SITE_ORIGIN=https://<domain> npm run build` writes the static site to `site/dist/`.",

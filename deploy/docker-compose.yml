@@ -11,8 +11,8 @@ services:
       args:
         SITE_ORIGIN: ${SITE_ORIGIN:-http://localhost:8080}
     image: frontx-site:local
-    # Enabled by: the published image (the publish job of .github/workflows/docker.yml, which runs on a version tag vX.Y.Z once the SITE_ORIGIN repository variable holds the production origin; latest is the highest release, X.Y.Z pins one). The job pushes ghcr.io/<owner>/<repository> of the repository it runs in, constructorfabric/frontx-showcase today. Replace `build` and `image` above with:
-    # image: ghcr.io/constructorfabric/frontx-showcase:latest
+    # Enabled by: the published image (the publish job of .github/workflows/docker.yml, which runs on a version tag vX.Y.Z once the SITE_ORIGIN repository variable holds the production origin; latest is the highest release, X.Y.Z pins one). The job pushes ghcr.io/<owner>/<repository> of the repository it runs in, cfabric/frontx-showcase today. Replace `build` and `image` above with:
+    # image: ghcr.io/cfabric/frontx-showcase:latest
     restart: unless-stopped
     read_only: true
     # Caddy keeps its state in /data and /config, writable by the image's user (uid 10001) only.
