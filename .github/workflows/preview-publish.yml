@@ -1,6 +1,6 @@
 name: Preview publish
 
-# Publishes the artifact of a successful "Preview build" run of a pull request into the preview repository (vars.PREVIEW_REPOSITORY, constructorfabric/frontx-showcase-previews by default) as pr-<N>/, served by its GitHub Pages at https://<owner>.github.io/<name>/pr-<N>/, and keeps one comment on the pull request that names it.
+# Publishes the artifact of a successful "Preview build" run of a pull request into the preview repository (vars.PREVIEW_REPOSITORY, cfabric/frontx-showcase-previews by default) as pr-<N>/, served by its GitHub Pages at https://<owner>.github.io/<name>/pr-<N>/, and keeps one comment on the pull request that names it.
 # Security: this run never checks out code and executes nothing from the artifact; the artifact is files only. The build ran the pull request's own code, its indexing check included, so this run makes every page of the artifact unindexable with its own shell before it publishes anything, and every path must be a regular file or a folder. The pull request number comes from preview-meta.json in the artifact (workflow_run.pull_requests is empty for a fork) and is checked as a positive integer, the head commit is checked against the run's. Every ${{ }} value reaches a script through env. The preview repository is written with a GitHub App installation token (vars.AUTOMATION_APP_ID, secrets.AUTOMATION_APP_PRIVATE_KEY); without the app the run ends green and says so.
 on:
   workflow_run:
@@ -41,7 +41,7 @@ jobs:
           echo "configured=false" >> "$GITHUB_OUTPUT"
           exit 0
         fi
-        repository="${PREVIEW_REPOSITORY:-constructorfabric/frontx-showcase-previews}"
+        repository="${PREVIEW_REPOSITORY:-cfabric/frontx-showcase-previews}"
         if ! printf '%s' "$repository" | grep -Eq '^[A-Za-z0-9-]+/[A-Za-z0-9._-]+$'; then echo "::error::PREVIEW_REPOSITORY must be owner/name, not '$repository'"; exit 1; fi
         owner="${repository%%/*}"
         name="${repository#*/}"
