@@ -114,6 +114,7 @@ const MFE_DIR = 'mfe';
  * @returns {{ file: string } | { problem: string }}
  */
 export function remoteEntryFile(config, extensionId) {
+  // @cpt-begin:cpt-site-algo-production-build-layout-check-links:p2:inst-check-remotes
   const extension = (config.extensions ?? []).find((candidate) => candidate.id === extensionId);
   const entry = (config.entries ?? []).find((candidate) => candidate.id === extension?.entry);
   if (!entry) return { problem: `declares no entry ${extension?.entry ?? '(none named)'} for the unlisted screen ${extensionId}` };
@@ -124,6 +125,7 @@ export function remoteEntryFile(config, extensionId) {
   if (typeof publicPath !== 'string' || typeof remoteEntry?.name !== 'string' || remoteEntry.name === '') return { problem: `gives the unlisted screen ${extensionId} no remote entry address` };
   const file = path.posix.normalize([publicPath, remoteEntry.path ?? '', remoteEntry.name].filter(Boolean).join('/'));
   return file.startsWith(`${MFE_DIR}/`) ? { file } : { problem: `gives the unlisted screen ${extensionId} the remote entry ${file}, which is not under ${MFE_DIR}/` };
+  // @cpt-end:cpt-site-algo-production-build-layout-check-links:p2:inst-check-remotes
 }
 
 /**
@@ -132,7 +134,9 @@ export function remoteEntryFile(config, extensionId) {
  * @param {string} token - the screen's route token
  */
 function addressPattern(domainKey, token) {
+  // @cpt-begin:cpt-site-algo-production-build-layout-check-links:p2:inst-check-outputs
   return new RegExp(`[?&;]${domainKey}=${token.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![A-Za-z0-9_-])`);
+  // @cpt-end:cpt-site-algo-production-build-layout-check-links:p2:inst-check-outputs
 }
 
 /**
@@ -141,6 +145,7 @@ function addressPattern(domainKey, token) {
  * @returns {string}
  */
 export function withoutCode(text) {
+  // @cpt-begin:cpt-site-algo-production-build-layout-check-links:p2:inst-check-outputs
   const lines = text.split('\n');
   const kept = [];
   for (let index = 0; index < lines.length; index += 1) {
@@ -155,6 +160,7 @@ export function withoutCode(text) {
     kept.push(lines[index].replace(/(`+)(?!`).*?(?<!`)\1(?!`)/g, ''));
   }
   return kept.join('\n');
+  // @cpt-end:cpt-site-algo-production-build-layout-check-links:p2:inst-check-outputs
 }
 
 /** Every file under a folder, as paths relative to it, skipping the folders `skip` names at the top. */
