@@ -94,12 +94,13 @@ Who sets what:
 
 Until `AUTOMATION_APP_ID` is set, "Preview publish" and "Preview remove" end green with the summary line `Preview publishing is not configured: AUTOMATION_APP_ID is not set` and do nothing else; "Preview build" still builds and checks every pull request.
 
-Switching the production site to the workflow:
+Bringing the production site up:
 
-1. The pull request that brings these workflows is green and reviewed.
-2. Right before merging it, a repository admin switches the Pages source from the branch to "GitHub Actions" (Settings, Pages, Build and deployment, Source; or `gh api -X PUT repos/cfabric/frontx-showcase/pages -f build_type=workflow`). The custom domain stays in the settings.
-3. Merge at once: the push to `main` runs "Deploy site to GitHub Pages", and the site is on the domain a few minutes later. What Pages serves between the switch and the first deployment of the workflow is not verified, so keep that gap short.
-4. Check `https://frontx.cfabric.org/`, a few deep links (`/?screen=docs;route=get-started`), `robots.txt` and `sitemap.xml`, then enable "Enforce HTTPS" when the certificate is ready.
+The Pages source of this repository is already "GitHub Actions", so nothing is switched before the merge. The custom domain `frontx.cfabric.org` is not set in the Pages settings, although the `CNAME` file is at the root of `main`: with the source "GitHub Actions", Pages takes the domain from its settings and not from that file. Until a repository admin sets it, the site does not open on the domain.
+
+1. The pull request that brings these workflows is green and reviewed, and is merged: the push to `main` runs "Deploy site to GitHub Pages".
+2. A repository admin sets the custom domain `frontx.cfabric.org` (Settings, Pages, Custom domain), before or after the merge. The build is made for that origin with the base path `/`, so it does not work at `https://cfabric.github.io/frontx-showcase/` either.
+3. Check `https://frontx.cfabric.org/`, a few deep links (`/?screen=docs;route=get-started`), `robots.txt` and `sitemap.xml`; the admin enables "Enforce HTTPS" once the certificate is issued.
 
 Rollback:
 
