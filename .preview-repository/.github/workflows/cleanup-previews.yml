@@ -12,8 +12,10 @@ on:
         default: ""
         type: string
 
+# contents: the removal commit. pages: the build request after it, since Pages starts no build for a commit pushed with this run's own token.
 permissions:
   contents: write
+  pages: write
 
 concurrency:
   group: cleanup-previews
@@ -40,6 +42,8 @@ jobs:
         sparse-checkout-cone-mode: false
 
     - name: Remove the stale previews
+      env:
+        GH_TOKEN: ${{ github.token }}
       run: |
         set -euo pipefail
         days="${INPUT_DAYS:-${VARIABLE_DAYS:-7}}"
@@ -60,7 +64,12 @@ jobs:
         git commit -q -m "Remove previews older than $days days: ${removed[*]}"
         branch="$(git symbolic-ref --short HEAD)"
         for attempt in 1 2 3; do
-          if git push origin "HEAD:$branch"; then echo "removed ${removed[*]}"; exit 0; fi
+          if git push origin "HEAD:$branch"; then
+            echo "removed ${removed[*]}"
+            # Without this request the removed previews stay served until another push builds the site.
+            if ! gh api -X POST "repos/$GITHUB_REPOSITORY/pages/builds" --silent; then echo "::error::the removal is pushed, but the Pages build request failed, so the removed previews are still served; request a build (gh api -X POST repos/$GITHUB_REPOSITORY/pages/builds) or wait for the next preview publish"; exit 1; fi
+            exit 0
+          fi
           echo "push attempt $attempt was refused; rebasing on $branch"
           git pull --rebase origin "$branch"
         done
