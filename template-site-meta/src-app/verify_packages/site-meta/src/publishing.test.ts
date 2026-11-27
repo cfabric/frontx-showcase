@@ -302,6 +302,12 @@ describe('pruneOutline', () => {
     expect(entriesOf(pruneOutline(page(entries), hidden))).toEqual([{ type: 'paragraph', text: 'kept' }]);
   });
 
+  it('drops a pair of template cards that loses a card, and keeps a pair that loses none', () => {
+    const whole = { type: 'template-pair', items: [{ title: 'a', href: toShown }, { title: 'b', href: { route: '/b' } }] };
+    const entries = [{ type: 'template-pair', items: [{ title: 'a', href: toHidden }, { title: 'b', href: toShown }] }, whole, { type: 'template-row', items: [{ title: 'a', href: toHidden }, { title: 'b', href: toShown }] }];
+    expect(entriesOf(pruneOutline(page(entries), hidden))).toEqual([whole, { type: 'template-row', items: [{ title: 'b', href: toShown }] }]);
+  });
+
   it('keeps a node that is neither a list item nor a labelled link, without its link, and drops what goes from a property that is not a list item', () => {
     const map = { type: 'architecture-map', id: 'm', map: { kit: { title: 'Kit', href: toHidden }, rules: { title: 'Rules', href: toShown } } };
     const explorer = { type: 'file-explorer', id: 'e', example: { title: 't', text: 'x', screens: [{ title: 'a', href: toHidden }], open: { label: 'open', href: toHidden } } };

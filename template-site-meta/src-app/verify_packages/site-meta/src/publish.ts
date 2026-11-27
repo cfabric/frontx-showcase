@@ -52,7 +52,7 @@ function prune(value: unknown, element: boolean, screens: ReadonlySet<string>, k
 
 // @cpt-algo:cpt-template-site-meta-algo-plain-text-twins-prune-outline:p2
 /**
- * The outline a published page shows: each page keeps its place; its entries lose the hidden ones (by id) and every link to a hidden screen, with what holds it; a page's back link to a hidden screen is dropped. The result is raw outline JSON, as the twins read it.
+ * The outline a published page shows: each page keeps its place; its entries lose the hidden ones (by id) and every link to a hidden screen, with what holds it; a pair of template cards that loses a card goes whole, since the model takes it only with both; a page's back link to a hidden screen is dropped. The result is raw outline JSON, as the twins read it.
  * @param value - the parsed outline JSON
  * @param publishing - the site's publishing choices
  */
@@ -63,10 +63,16 @@ export function pruneOutline(value: unknown, publishing: Publishing): unknown {
   // @cpt-begin:cpt-template-site-meta-algo-plain-text-twins-prune-outline:p2:inst-foreach-page
   const screens = new Set(publishing.hiddenScreens);
   const entries = new Set(publishing.hiddenEntries);
+  /** An entry as the page shows it. A `template-pair` is two cards and nothing less, so one that loses a card goes whole instead of reaching the model with one. */
+  const shown = (entry: unknown): unknown => {
+    const pruned = prune(entry, true, screens);
+    const short = isObject(entry) && entry.type === 'template-pair' && Array.isArray(entry.items) && isObject(pruned) && Array.isArray(pruned.items) && pruned.items.length < entry.items.length;
+    return short ? GONE : pruned;
+  };
   const pages = value.pages.map((page: unknown) => {
     if (!isObject(page)) return page;
     const { back, entries: list, ...rest } = page;
-    const kept = Array.isArray(list) ? list.filter((entry) => !(isObject(entry) && typeof entry.id === 'string' && entries.has(entry.id))).map((entry) => prune(entry, true, screens)).filter((entry) => entry !== GONE) : list;
+    const kept = Array.isArray(list) ? list.filter((entry) => !(isObject(entry) && typeof entry.id === 'string' && entries.has(entry.id))).map(shown).filter((entry) => entry !== GONE) : list;
     const shownBack = back === undefined ? undefined : prune(back, false, screens);
     return { ...rest, ...(shownBack === undefined || shownBack === GONE ? {} : { back: shownBack }), entries: kept };
   });

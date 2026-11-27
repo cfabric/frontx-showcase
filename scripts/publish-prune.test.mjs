@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
+import { parseOutline } from '../template-site/src-app/mfe_packages/shared/site/content/outline.ts';
 import * as site from '../template-site/src-app/mfe_packages/shared/site/content/publish.ts';
 import * as meta from '../template-site-meta/src-app/verify_packages/site-meta/src/publish.ts';
 
@@ -49,6 +50,17 @@ describe('the two copies of the publishing rule', () => {
     const screens = [...linkedScreens(outline)];
     const cases = [...screens.map((id) => ({ hiddenScreens: [id], hiddenEntries: [] })), { hiddenScreens: screens, hiddenEntries: ['home-teams'] }];
     for (const publishing of cases) expect(meta.pruneOutline(outline, publishing)).toEqual(site.pruneOutline(outline, publishing));
+  });
+
+  it('drop a pair of template cards that loses a card, so the outline the page reads still passes the model', () => {
+    const card = (title, href) => ({ title, text: 'Card.', href });
+    const outline = { screen: 'templates', strings: 'x', pages: [{ route: '/', title: 't', lead: 'l', entries: [{ type: 'template-pair', items: [card('Kit', { extension: 'ext.kit' }), card('Docs', { extension: 'ext.docs' })] }, { type: 'paragraph', text: 'kept' }] }] };
+    const publishing = { hiddenScreens: ['ext.kit'], hiddenEntries: [] };
+    const pruned = site.pruneOutline(outline, publishing);
+    expect(meta.pruneOutline(outline, publishing)).toEqual(pruned);
+    expect(pruned.pages[0].entries).toEqual([{ type: 'paragraph', text: 'kept' }]);
+    expect(parseOutline(pruned).pages[0].entries.map((entry) => entry.type)).toEqual(['paragraph']);
+    expect(parseOutline(outline).pages[0].entries.map((entry) => entry.type)).toEqual(['template-pair', 'paragraph']);
   });
 
   it('read the publishing build variables in template-site only, and hide nothing without them', () => {
