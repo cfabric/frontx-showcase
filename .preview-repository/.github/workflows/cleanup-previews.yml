@@ -42,8 +42,7 @@ jobs:
         sparse-checkout-cone-mode: false
 
     - name: Remove the stale previews
-      env:
-        GH_TOKEN: ${{ github.token }}
+      id: remove
       run: |
         set -euo pipefail
         days="${INPUT_DAYS:-${VARIABLE_DAYS:-7}}"
@@ -64,14 +63,17 @@ jobs:
         git commit -q -m "Remove previews older than $days days: ${removed[*]}"
         branch="$(git symbolic-ref --short HEAD)"
         for attempt in 1 2 3; do
-          if git push origin "HEAD:$branch"; then
-            echo "removed ${removed[*]}"
-            # Without this request the removed previews stay served until another push builds the site.
-            if ! gh api -X POST "repos/$GITHUB_REPOSITORY/pages/builds" --silent; then echo "::error::the removal is pushed, but the Pages build request failed, so the removed previews are still served; request a build (gh api -X POST repos/$GITHUB_REPOSITORY/pages/builds) or wait for the next preview publish"; exit 1; fi
-            exit 0
-          fi
+          if git push origin "HEAD:$branch"; then echo "removed ${removed[*]}"; echo "removed=true" >> "$GITHUB_OUTPUT"; exit 0; fi
           echo "push attempt $attempt was refused; rebasing on $branch"
           git pull --rebase origin "$branch"
         done
         echo "::error::could not push the removal after 3 attempts"
         exit 1
+
+    # Without this request the removed previews stay served until another push builds the site. A re-run requests it too: the removal of the failed attempt is already pushed, so the re-run removes nothing, and the build is what it still owes.
+    - name: Request the Pages build
+      if: steps.remove.outputs.removed == 'true' || github.run_attempt != '1'
+      env:
+        GH_TOKEN: ${{ github.token }}
+      run: |
+        if ! gh api -X POST "repos/$GITHUB_REPOSITORY/pages/builds" --silent; then echo "::error::the Pages build request failed, so removed previews may still be served; re-run this run to request it again"; exit 1; fi
