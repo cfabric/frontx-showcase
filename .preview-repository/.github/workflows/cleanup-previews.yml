@@ -70,7 +70,7 @@ jobs:
         echo "::error::could not push the removal after 3 attempts"
         exit 1
 
-    # Without this request the removed previews stay served until another push builds the site. A re-run requests it too: the removal of the failed attempt is already pushed, so the re-run removes nothing, and the build is what it still owes.
+    # Without this request the removed previews stay served until another push builds the site. A re-run requests it too: when an earlier attempt pushed the removal but its request failed, the re-run removes nothing and still owes the build.
     - name: Request the Pages build
       if: steps.remove.outputs.removed == 'true' || github.run_attempt != '1'
       env:

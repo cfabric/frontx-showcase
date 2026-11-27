@@ -58,7 +58,7 @@ describe('the two copies of the publishing rule', () => {
     const publishing = { hiddenScreens: ['ext.kit'], hiddenEntries: [] };
     const pruned = site.pruneOutline(outline, publishing);
     expect(meta.pruneOutline(outline, publishing)).toEqual(pruned);
-    expect(pruned.pages[0].entries).toEqual([{ type: 'paragraph', text: 'kept' }]);
+    expect(/** @type {{ pages: { entries: unknown[] }[] }} */ (pruned).pages[0]?.entries).toEqual([{ type: 'paragraph', text: 'kept' }]);
     expect(parseOutline(pruned).pages[0].entries.map((entry) => entry.type)).toEqual(['paragraph']);
     expect(parseOutline(outline).pages[0].entries.map((entry) => entry.type)).toEqual(['template-pair', 'paragraph']);
   });
