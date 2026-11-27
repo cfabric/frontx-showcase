@@ -180,6 +180,14 @@ describe('unlistedFindings', () => {
     ]);
   });
 
+  it('turns red on a link between two backticks of one line in the document and the sitemap, where a backtick opens no code, and still takes such a span for code in a twin', () => {
+    clean();
+    write('dist/index.html', documentWith(pageMap(), '<script>const a = `x</script><a href="./?screen=kit">Kit</a><script>y`;</script>'));
+    write('dist/sitemap.xml', '<!-- ` --><loc>https://site.example/?screen=demo-b</loc><!-- ` -->');
+    write('dist/home/index.md', 'The address `?screen=demo-a` opens the demo.');
+    expect(findings()).toEqual(['dist/index.html links the unlisted screen kit (screen=kit)', 'dist/sitemap.xml links the unlisted screen demo-b (screen=demo-b)']);
+  });
+
   it("turns red on a literal address in the shell's sources and the shared content, and leaves their tests aside", () => {
     clean();
     write('src-app/app/layout/Header.tsx', 'export const kit = "/?screen=kit";');

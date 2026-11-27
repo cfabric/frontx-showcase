@@ -20,6 +20,8 @@ const CODE_DIRS = new Set(['mfe', 'assets']);
 /** The text files of dist/ the check reads; in the generated machine files (the document, the discovery files) an extension id is a link too. */
 const TEXT_FILE = /\.(html|md|txt|xml|json|webmanifest)$/;
 const MACHINE_FILE = /\.(html|xml|json|webmanifest)$/;
+/** The markup files of dist/: a backtick opens no code in HTML or XML, so they are read whole, their inline scripts included, and nothing between two backticks of one line is skipped. */
+const MARKUP_FILE = /\.(html|xml)$/;
 /** The aggregate the shell registers the screens from: it must carry the unlisted screens, so the link scan leaves it to the registration check. */
 const AGGREGATE_FILE = 'generated-mfe-manifests.json';
 /** The page map template-site-meta inlines into the document: head-sync gives each page, an unlisted one included, its head from it, so the link scan leaves it to the noindex check. */
@@ -180,7 +182,7 @@ function filesUnder(dir, skip = new Set(), prefix = '') {
  * Where the built site links an unlisted screen, or would not open or would let be indexed one, as messages; empty when it does neither.
  * - the aggregate in `dist/` does not register an unlisted screen's extension, or the remote entry file its manifest names (`mfe/<package>/remoteEntry.js`) is not in `dist/`, so its pages would not open;
  * - Markdown sits in an unlisted screen's twin folder (`dist/<token>/`), a twin left from an earlier configuration;
- * - a generated text file of `dist/` (the document without its page map, the discovery files, the twins; the aggregate is the registry and is left to the check above) names an unlisted screen's address (`?screen=<token>`) outside code, where a quoted source file may mention one; a generated machine file (the document, the manifests, the sitemap) names its extension id;
+ * - a generated text file of `dist/` (the document without its page map, the discovery files, the twins; the aggregate is the registry and is left to the check above) names an unlisted screen's address (`?screen=<token>`): anywhere in markup (HTML, XML), where a backtick opens no code, and outside code elsewhere, where a quoted source file may mention one; a generated machine file (the document, the manifests, the sitemap) names its extension id;
  * - the page map in `dist/index.html` lacks a page an unlisted screen declares (its root, a route of its `seo.routes`), or lets one of its pages or pattern routes be indexed: head-sync writes the head and the robots meta from it;
  * - a listed screen package's sources under `src/` (tests aside) name such an address: its JSON data outside code, strings included, its TypeScript and Markdown anywhere, code included, since that code is what ships; or its outline, pruned as the page shows it, still links such a screen;
  * - the shell's own sources or the screens' shared content (`src-app/app/`, `src-app/mfe_packages/shared/`; TypeScript, JSON and Markdown, tests aside) name such an address anywhere, code included, since that code is what ships;
@@ -222,14 +224,14 @@ export function unlistedFindings(siteDir, composed, publishing) {
       return undefined;
     }
   };
-  const scan = (label, text, ids) => {
-    const outside = prose(label, text);
+  const scan = (label, text, ids, markup) => {
+    const outside = markup ? text : prose(label, text);
     if (outside !== undefined) for (const { token, pattern } of addresses) if (pattern.test(outside)) findings.push(`${label} links the unlisted screen ${token} (${composed.domainKey}=${token})`);
     if (ids) for (const id of publishing.hiddenScreens) if (text.includes(id)) findings.push(`${label} names the unlisted screen ${id}`);
   };
   for (const file of filesUnder(distDir, CODE_DIRS).filter((name) => TEXT_FILE.test(name) && name !== AGGREGATE_FILE)) {
     const text = fs.readFileSync(path.join(distDir, file), 'utf8');
-    scan(`dist/${file.split(path.sep).join('/')}`, file.endsWith('.html') ? text.replace(PAGE_MAP, '') : text, MACHINE_FILE.test(file));
+    scan(`dist/${file.split(path.sep).join('/')}`, file.endsWith('.html') ? text.replace(PAGE_MAP, '') : text, MACHINE_FILE.test(file), MARKUP_FILE.test(file));
   }
   // An unlisted screen has no twin: its outline is not rendered, so Markdown in its token's folder is one left from an earlier configuration.
   for (const screen of unlisted) for (const file of filesUnder(path.join(distDir, screen.token)).filter((name) => name.endsWith('.md'))) findings.push(`dist/${screen.token}/${file.split(path.sep).join('/')} is a twin of the unlisted screen ${screen.token}, which publishes none`);
