@@ -1,0 +1,252 @@
+name: Preview publish
+
+# Publishes the artifact of a successful "Preview build" run of a pull request into the preview repository (vars.PREVIEW_REPOSITORY, cfabric/frontx-showcase-previews by default) as pr-<N>/, served by its GitHub Pages at https://<owner>.github.io/<name>/pr-<N>/, and keeps one comment on the pull request that names it.
+# Security: this run never checks out code and executes nothing from the artifact; the artifact is files only. The build ran the pull request's own code, its indexing check included, so this run makes every page of the artifact unindexable with its own shell before it publishes anything, and every path must be a regular file or a folder. The pull request number comes from preview-meta.json in the artifact (workflow_run.pull_requests is empty for a fork) and is checked as a positive integer, the head commit is checked against the run's. Every ${{ }} value reaches a script through env. The preview repository is written with a GitHub App installation token (vars.AUTOMATION_APP_ID, secrets.AUTOMATION_APP_PRIVATE_KEY); without the app the run ends green and says so.
+on:
+  workflow_run:
+    workflows: [ "Preview build" ]
+    types: [ completed ]
+
+permissions:
+  actions: read
+  contents: read
+  pull-requests: read
+
+# One group per pull request, so a newer pending run replaces only an older pending publish of the same pull request. The number is read from the artifact later, so the key is the head repository and branch, which name one open pull request into main. Overlapping pushes of other runs are handled by the 3 pull --rebase attempts. A publish of a pull request already closed when the open-state check below runs is not published; one that closes in the seconds between that check and the push can leave a preview, which cleanup-previews in the preview repository removes after the retention period.
+concurrency:
+  group: preview-publish-${{ github.event.workflow_run.head_repository.full_name }}-${{ github.event.workflow_run.head_branch }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Publish
+    if: github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      APP_ID: ${{ vars.AUTOMATION_APP_ID }}
+      PREVIEW_REPOSITORY: ${{ vars.PREVIEW_REPOSITORY }}
+      PREVIEW_RETENTION_DAYS: ${{ vars.PREVIEW_RETENTION_DAYS }}
+      RUN_HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+      REPOSITORY: ${{ github.repository }}
+      REPOSITORY_OWNER: ${{ github.repository_owner }}
+      REPOSITORY_NAME: ${{ github.event.repository.name }}
+    steps:
+    - name: Check the configuration
+      id: config
+      run: |
+        set -euo pipefail
+        if [ -z "$APP_ID" ]; then
+          echo "Preview publishing is not configured: AUTOMATION_APP_ID is not set" >> "$GITHUB_STEP_SUMMARY"
+          echo "configured=false" >> "$GITHUB_OUTPUT"
+          exit 0
+        fi
+        repository="${PREVIEW_REPOSITORY:-cfabric/frontx-showcase-previews}"
+        if ! printf '%s' "$repository" | grep -Eq '^[A-Za-z0-9-]+/[A-Za-z0-9._-]+$'; then echo "::error::PREVIEW_REPOSITORY must be owner/name, not '$repository'"; exit 1; fi
+        owner="${repository%%/*}"
+        name="${repository#*/}"
+        # Both app tokens come from the app's installation on this owner, so the preview repository shares the owner.
+        if [ "$owner" != "$REPOSITORY_OWNER" ]; then echo "::error::PREVIEW_REPOSITORY must belong to $REPOSITORY_OWNER, not $owner"; exit 1; fi
+        retention="${PREVIEW_RETENTION_DAYS:-7}"
+        if ! printf '%s' "$retention" | grep -Eq '^[1-9][0-9]*$'; then echo "::error::PREVIEW_RETENTION_DAYS must be a positive integer, not '$retention'"; exit 1; fi
+        {
+          echo "configured=true"
+          echo "repository=$repository"
+          echo "owner=$owner"
+          echo "name=$name"
+          echo "retention=$retention"
+        } >> "$GITHUB_OUTPUT"
+
+    - name: Download the preview artifact
+      if: steps.config.outputs.configured == 'true'
+      uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+      with:
+        name: site-preview
+        path: preview
+        run-id: ${{ github.event.workflow_run.id }}
+        github-token: ${{ github.token }}
+
+    # Threat model: the artifact was built by the pull request's own code, from a fork or a branch, so this run trusts none of it; it does not control what a preview page shows, only that none is indexed.
+    # How: its own robots meta goes in right after the opening doctype of every page, where nothing earlier in the file can hide it, and it writes robots.txt and drops sitemap.xml and llms.txt itself; nothing from the artifact or the pull request runs.
+    # Accepted residual window: a page's own script can change its robots meta after load, which a crawler indexing the rendered page would see.
+    # Only files with an extension in the step's allowlist are published, and the Markdown copies of the pages are removed, since Pages cannot mark them noindex; a search engine may still index an SVG or JSON file, an accepted window.
+    # The size limit of "Preview build" is enforced here for the same reason: the preview repository's Pages site, 1 GB for every open preview, takes at most MAX_MB from one.
+    - name: Make every page of the artifact unindexable
+      if: steps.config.outputs.configured == 'true'
+      env:
+        MAX_MB: 150
+      run: |
+        set -euo pipefail
+        cd preview
+        export LC_ALL=C
+        # An artifact value reaches a runner command line only when it is a plain path of at most 200 characters; any other name gets a fixed text, so it cannot forge a workflow command.
+        refuse() {
+          if [[ "$1" =~ ^[A-Za-z0-9._/-]{1,200}$ ]]; then echo "::error::$1 $2"; else echo "::error::the artifact holds a file with a name a preview may not publish"; fi
+          exit 1
+        }
+        odd="$(find . ! -type f ! -type d -print -quit)"
+        if [ -n "$odd" ]; then refuse "$odd" "is not a regular file or folder"; fi
+        size="$(du -sm . | cut -f1)"
+        if [ "$size" -gt "$MAX_MB" ]; then echo "::error::the artifact is $size MB, over the $MAX_MB MB a preview may take"; exit 1; fi
+        # Pages cannot mark a Markdown file noindex, so the Markdown copies of the pages are not published.
+        find . -type f -iname '*.md' -delete
+        # The only list of the extensions a preview may publish. Of the other files only robots.txt, sitemap.xml and llms.txt at the root pass, and this run rewrites or removes them below.
+        allowed=' html htm js css json png svg woff2 ico webmanifest jpg jpeg webp avif gif '
+        while IFS= read -r -d '' file; do
+          case "$file" in ./robots.txt | ./sitemap.xml | ./llms.txt) continue ;; esac
+          base="${file##*/}"
+          case "$base" in *.*) ext="$(printf '%s' "${base##*.}" | tr '[:upper:]' '[:lower:]')" ;; *) ext='' ;; esac
+          if [ -z "$ext" ]; then refuse "$file" "has no extension"; fi
+          if ! [[ "$ext" =~ ^[a-z0-9]+$ ]]; then refuse "$file" "has an extension a preview may not publish"; fi
+          case "$allowed" in *" $ext "*) ;; *) refuse "$file" "has the extension .$ext, which a preview may not publish" ;; esac
+        done < <(find . -type f -print0)
+        doctype='<!doctype html>'
+        meta='<meta name="robots" content="noindex, nofollow">'
+        other="$(find . -type f \( -iname '*.xhtml' -o -iname '*.shtml' -o -iname '*.xht' -o -iname '*.shtm' \) -print -quit)"
+        if [ -n "$other" ]; then refuse "$other" "is a page this run does not make unindexable"; fi
+        while IFS= read -r -d '' file; do
+          case "$(head -c 18 "$file" | tr '[:upper:]' '[:lower:]')" in
+            '<!doctype html>'* | $'\xef\xbb\xbf<!doctype html>'*) refuse "$file" "starts like an HTML page but is not named .html or .htm" ;;
+          esac
+        done < <(find . -type f ! -iname '*.html' ! -iname '*.htm' -print0)
+        while IFS= read -r -d '' page; do
+          if [ "$(head -c 15 "$page" | tr '[:upper:]' '[:lower:]')" != "$doctype" ]; then refuse "$page" "does not start with $doctype"; fi
+          written="$(mktemp)"
+          { head -c 15 "$page"; printf '%s' "$meta"; tail -c +16 "$page"; } > "$written"
+          mv -f "$written" "$page"
+        done < <(find . -type f \( -iname '*.html' -o -iname '*.htm' \) -print0)
+        printf 'User-agent: *\nDisallow: /' > robots.txt
+        rm -f sitemap.xml llms.txt
+        while IFS= read -r -d '' page; do
+          if [ "$(head -c 63 "$page" | tr '[:upper:]' '[:lower:]')" != "$doctype$meta" ]; then refuse "$page" "does not start with its robots meta"; fi
+        done < <(find . -type f \( -iname '*.html' -o -iname '*.htm' \) -print0)
+        if [ "$(cat robots.txt)" != "$(printf 'User-agent: *\nDisallow: /')" ]; then echo "::error::robots.txt is not the one this run wrote"; exit 1; fi
+        if [ -e sitemap.xml ] || [ -e llms.txt ]; then echo "::error::sitemap.xml or llms.txt is still there"; exit 1; fi
+        echo "every page of the artifact is noindex"
+
+    - name: Read the pull request
+      if: steps.config.outputs.configured == 'true'
+      id: pr
+      run: |
+        set -euo pipefail
+        meta=preview/preview-meta.json
+        if [ ! -f "$meta" ] || [ -L "$meta" ]; then echo "::error::the artifact has no preview-meta.json"; exit 1; fi
+        number="$(jq -r '.pr_number | tostring' "$meta")"
+        sha="$(jq -r '.head_sha | tostring' "$meta")"
+        # The whole value is tested, not each line of it, and the error texts are fixed, so a value from the artifact cannot forge a workflow command.
+        if ! [[ "$number" =~ ^[1-9][0-9]{0,9}$ ]]; then echo "::error::pr_number in preview-meta.json is not a positive integer"; exit 1; fi
+        if ! [[ "$sha" =~ ^[0-9a-f]{40}$ ]] || [ "$sha" != "$RUN_HEAD_SHA" ]; then echo "::error::head_sha in preview-meta.json is not the head commit of the build run ($RUN_HEAD_SHA)"; exit 1; fi
+        rm "$meta"
+        echo "number=$number" >> "$GITHUB_OUTPUT"
+        echo "sha=$sha" >> "$GITHUB_OUTPUT"
+
+    # A build that finishes after its pull request closed, or a publish run re-run by hand, would bring back the preview "Preview remove" took down. The pull request's head commit must also be the commit this run built: the number comes from the artifact, which the build could forge, and no other pull request's head is this run's commit, so a build cannot publish as another open pull request. A build overtaken by a newer push is not published either; the newer build publishes.
+    - name: Check the pull request is open
+      if: steps.config.outputs.configured == 'true'
+      id: state
+      env:
+        GH_TOKEN: ${{ github.token }}
+        PR_NUMBER: ${{ steps.pr.outputs.number }}
+      run: |
+        set -euo pipefail
+        pull="$(gh api "repos/$REPOSITORY/pulls/$PR_NUMBER" --jq '[.state, .head.sha] | @tsv')"
+        state="$(printf '%s' "$pull" | cut -f1)"
+        head="$(printf '%s' "$pull" | cut -f2)"
+        if [ "$state" != open ]; then
+          echo "Pull request #$PR_NUMBER is closed; the preview is not published" >> "$GITHUB_STEP_SUMMARY"
+          echo "open=false" >> "$GITHUB_OUTPUT"
+          exit 0
+        fi
+        if [ "$head" != "$RUN_HEAD_SHA" ]; then
+          echo "Pull request #$PR_NUMBER has moved past this build; the preview is not published" >> "$GITHUB_STEP_SUMMARY"
+          echo "open=false" >> "$GITHUB_OUTPUT"
+          exit 0
+        fi
+        echo "open=true" >> "$GITHUB_OUTPUT"
+
+    # Each token is narrowed to one repository and one permission: the app's permissions apply to every repository it is installed on, and this run never needs to write this repository's code.
+    - name: Create the app token for the preview repository
+      if: steps.config.outputs.configured == 'true' && steps.state.outputs.open == 'true'
+      id: push-token
+      uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+      with:
+        app-id: ${{ vars.AUTOMATION_APP_ID }}
+        private-key: ${{ secrets.AUTOMATION_APP_PRIVATE_KEY }}
+        owner: ${{ steps.config.outputs.owner }}
+        repositories: ${{ steps.config.outputs.name }}
+        permission-contents: write
+
+    - name: Publish pr-<N>/ to the preview repository
+      if: steps.config.outputs.configured == 'true' && steps.state.outputs.open == 'true'
+      env:
+        GH_TOKEN: ${{ steps.push-token.outputs.token }}
+        TARGET: ${{ steps.config.outputs.repository }}
+        PR_NUMBER: ${{ steps.pr.outputs.number }}
+        HEAD_SHA: ${{ steps.pr.outputs.sha }}
+      run: |
+        set -euo pipefail
+        auth="$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 | tr -d '\n')"
+        echo "::add-mask::$auth"
+        git_auth() { git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic $auth" "$@"; }
+        # Only pr-<N>/ and the top-level files are checked out: the other previews stay on the server.
+        git_auth clone --filter=blob:none --sparse --depth 50 "https://github.com/$TARGET.git" previews
+        cd previews
+        git sparse-checkout set "pr-$PR_NUMBER"
+        git config user.name frontx-showcase-preview-bot
+        git config user.email preview-bot@frontx-showcase.invalid
+        branch="$(git symbolic-ref --short HEAD)"
+        rm -rf "pr-$PR_NUMBER"
+        mkdir "pr-$PR_NUMBER"
+        cp -R ../preview/. "pr-$PR_NUMBER/"
+        # A symlink could point outside pr-<N>/, and Pages would serve what it points to; only regular files and folders are committed.
+        odd="$(find "pr-$PR_NUMBER" ! -type f ! -type d)"
+        if [ -n "$odd" ]; then echo "::error::the copied preview holds paths that are not regular files or folders"; exit 1; fi
+        # This run writes the build marker after the artifact checks, so the allowlist does not apply to it; it changes pr-<N>/ on every publish, so a rebuild renews the date the cleanup reads.
+        printf '%s %s\n' "$HEAD_SHA" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "pr-$PR_NUMBER/.preview-build"
+        git add -A "pr-$PR_NUMBER"
+        if git diff --cached --quiet; then echo "pr-$PR_NUMBER/ is already this build"; exit 0; fi
+        git commit -q -m "Preview of $REPOSITORY#$PR_NUMBER at $HEAD_SHA"
+        for attempt in 1 2 3; do
+          if git_auth push origin "HEAD:$branch"; then echo "published pr-$PR_NUMBER/"; exit 0; fi
+          echo "push attempt $attempt was refused; rebasing on $branch"
+          git_auth pull --rebase origin "$branch"
+        done
+        echo "::error::could not push pr-$PR_NUMBER/ after 3 attempts"
+        exit 1
+
+    - name: Create the app token for the pull request comment
+      if: steps.config.outputs.configured == 'true' && steps.state.outputs.open == 'true'
+      id: comment-token
+      uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+      with:
+        app-id: ${{ vars.AUTOMATION_APP_ID }}
+        private-key: ${{ secrets.AUTOMATION_APP_PRIVATE_KEY }}
+        owner: ${{ github.repository_owner }}
+        repositories: ${{ github.event.repository.name }}
+        permission-pull-requests: write
+
+    # One comment per pull request, found by its hidden marker among the app's own comments and updated on every push. The REST API posts to the base repository's issue thread, which works for a pull request from a fork too.
+    - name: Comment the preview address on the pull request
+      if: steps.config.outputs.configured == 'true' && steps.state.outputs.open == 'true'
+      env:
+        GH_TOKEN: ${{ steps.comment-token.outputs.token }}
+        APP_SLUG: ${{ steps.comment-token.outputs.app-slug }}
+        PR_NUMBER: ${{ steps.pr.outputs.number }}
+        HEAD_SHA: ${{ steps.pr.outputs.sha }}
+        OWNER: ${{ steps.config.outputs.owner }}
+        NAME: ${{ steps.config.outputs.name }}
+        RETENTION: ${{ steps.config.outputs.retention }}
+      run: |
+        set -euo pipefail
+        marker='<!-- frontx-showcase-preview -->'
+        url="https://$OWNER.github.io/$NAME/pr-$PR_NUMBER/"
+        body="$(printf '%s\n**Preview:** %s\n\nBuilt from %s. Pages may take a few minutes to serve a new build. Its pages are not indexed (an SVG or JSON file may be); it is removed when this pull request closes, or after %s days without a new build (a re-run of a build counts as one). The Markdown copies of the pages are not published in a preview.' "$marker" "$url" "$HEAD_SHA" "$RETENTION")"
+        bot="${APP_SLUG}[bot]"
+        existing="$(gh api --paginate "/repos/$REPOSITORY/issues/$PR_NUMBER/comments" --jq ".[] | select(.user.login == \"$bot\" and (.body | contains(\"$marker\"))) | .id" | sed -n 1p)"
+        if [ -n "$existing" ]; then
+          gh api --method PATCH "/repos/$REPOSITORY/issues/comments/$existing" -f body="$body" > /dev/null
+          echo "updated comment $existing"
+        else
+          gh api --method POST "/repos/$REPOSITORY/issues/$PR_NUMBER/comments" -f body="$body" > /dev/null
+          echo "posted a comment"
+        fi

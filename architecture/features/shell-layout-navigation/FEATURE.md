@@ -205,11 +205,12 @@ The site needs one look across the shell and its screens, a navigation that foll
 **Output**: The home screen, the footer screens, the ink footer screens, the header's entries and the offered languages.
 
 **Steps**:
-1. [x] - `p1` - Read `homeScreen`, `languages`, `footerScreens`, `inkFooterScreens` and `headerHiddenGroups` from `site.config.json` - `inst-read-config`
+1. [x] - `p1` - Read `homeScreen`, `languages`, `footerScreens`, `inkFooterScreens` and `headerHiddenGroups` from `site.config.json`, and the extension ids of the unlisted screens from the build variable `VITE_SITE_HIDDEN_SCREENS` (none in development and the tests) - `inst-read-config`
 2. [x] - `p1` - Find a screen by its route token wherever it sits in the entries, the screens of a group included, so menu order never moves the home screen or a footer link - `inst-screen-by-token`
 3. [x] - `p1` - Find the mounted screen wherever it sits in the entries - `inst-active-screen`
 4. [x] - `p1` - Leave the groups `headerHiddenGroups` names out of the header's entries; their screens stay registered and addressable - `inst-without-groups`
-5. [x] - `p1` - Offer the framework's supported languages the site ships, in the site's order, dropping a code the framework cannot switch to - `inst-offered-languages`
+5. [x] - `p1` - Leave the unlisted screens out of the header's entries, from inside a group too, and a group they empty with them; they stay registered and addressable - `inst-without-screens`
+6. [x] - `p1` - Offer the framework's supported languages the site ships, in the site's order, dropping a code the framework cannot switch to - `inst-offered-languages`
 
 ### Render the page frame
 
@@ -221,7 +222,7 @@ The site needs one look across the shell and its screens, a navigation that foll
 
 **Steps**:
 1. [x] - `p1` - Render a skip link first; on activation it moves focus to the main landmark without following the fragment, so no history entry is added and the address stays clean - `inst-skip-link`
-2. [x] - `p1` - Render the header: the lockup (the brand template's logo and the wordmark on the kit candidate `Link`) linking to the home screen (or the bare document address while the home is unknown), the menu without the hidden groups, the source repository link on the kit candidate `Link` and the language select - `inst-header`
+2. [x] - `p1` - Render the header: the lockup (the brand template's logo and the wordmark on the kit candidate `Link`) linking to the home screen (or the bare document address while the home is unknown), the menu without the hidden groups and the unlisted screens, the source repository link on the kit candidate `Link` and the language select - `inst-header`
 3. [x] - `p1` - **IF** the site offers fewer than two languages, render no language select - `inst-if-one-language`
 4. [x] - `p1` - Render the menu: an empty labelled navigation while the entries are unknown, else one real link per top-level screen and one disclosure group per group, the mounted screen marked current, a group named from the layout strings (`nav.groups.<name>`) or its name title-cased - `inst-menu`
 5. [x] - `p1` - Render the main landmark holding the screen domain's slot, with the right sidebar shown while the layout state keeps it visible - `inst-main`
@@ -302,7 +303,7 @@ One store per page holds the latest failed screen mount and notifies its subscri
 
 - [x] `p1` - **ID**: `cpt-site-dod-shell-layout-navigation-header-navigation`
 
-The system **MUST** build the header navigation from the registered screen extensions (label and order from `presentation`, a group only when `presentation.group` names a nav group the host defines), leave out the groups `site.config.json` hides, render every entry as a real link to its canonical address relative to the shell's document, and mount a screen on a plain click through the screen domain's `mount_ext` action.
+The system **MUST** build the header navigation from the registered screen extensions (label and order from `presentation`, a group only when `presentation.group` names a nav group the host defines), leave out the groups `site.config.json` hides and, in the production build, the screens it leaves unlisted, render every entry as a real link to its canonical address relative to the shell's document, and mount a screen on a plain click through the screen domain's `mount_ext` action.
 
 **Implements**:
 - `cpt-site-flow-shell-layout-navigation-open-screen`
@@ -364,7 +365,7 @@ The system **MUST** render the skip link, header, main landmark with the screen 
 
 ## 6. Acceptance Criteria
 
-- [x] The header lists Home, Templates, UI Kit, Blocks, Libraries and Docs from the registered screens and the demo screens under the demos group's entry; a group `site.config.json` hides is left out, and the site hides none (`navigation.test.ts`, `Header.test.tsx`, `useScreenNavigation.test.ts`, `navGroups.test.ts`).
+- [x] The header lists Home, Templates, UI Kit, Blocks, Libraries and Docs from the registered screens and the demo screens under the demos group's entry; a group `site.config.json` hides is left out, and the site hides none; the unlisted screens the build variable names are left out of the menu, from inside a group too (`navigation.test.ts`, `Header.test.tsx`, `useScreenNavigation.test.ts`, `navGroups.test.ts`).
 - [x] Every navigation, brand and footer entry is a link whose address is relative to the shell's document; a plain click mounts the screen through `mount_ext`, a modified click is left to the browser (`Menu.test.tsx`, `Footer.test.tsx`, `navigation.test.ts`).
 - [x] At the bare address the configured home screen opens with the `replace` intent; a deep link is not replaced; a home token no screen carries is reported and opens nothing (`MfeScreenContainer.test.tsx`, `home.test.ts`).
 - [x] A screen that fails to load shows a kit-built alert with a retry that keeps the failed action's history intent; a failed bootstrap shows only that alert and reloads on retry (`MfeScreenContainer.test.tsx`).

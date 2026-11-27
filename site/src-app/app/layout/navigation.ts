@@ -144,6 +144,21 @@ export function withoutGroups(entries: readonly NavEntry[], hidden: readonly str
 }
 
 /**
+ * The entries without the screens the production build leaves unlisted, wherever they sit: a group keeps its other screens and goes when none is left. The screens stay registered and open by their address; only the header's menu stops linking them.
+ * @param entries - the navigation entries
+ * @param unlisted - extension ids from the build variable `VITE_SITE_HIDDEN_SCREENS` (`site.ts`)
+ */
+export function withoutScreens(entries: readonly NavEntry[], unlisted: readonly string[]): NavEntry[] {
+  // @cpt-begin:cpt-site-algo-shell-layout-navigation-site-choices:p1:inst-without-screens
+  return entries.flatMap((entry): NavEntry[] => {
+    if (entry.kind === 'screen') return unlisted.includes(entry.id) ? [] : [entry];
+    const items = entry.items.filter((item) => !unlisted.includes(item.id));
+    return items.length === 0 ? [] : [{ ...entry, items, active: items.some((item) => item.active) }];
+  });
+  // @cpt-end:cpt-site-algo-shell-layout-navigation-site-choices:p1:inst-without-screens
+}
+
+/**
  * The screen whose route token is `token`, wherever it sits in the menu (a screen inside a group counts too). Menu order plays no part, so adding a screen with a lower `presentation.order` never moves the home screen or a footer link.
  * @param entries - the navigation entries
  * @param token - a route token from `site.config.json` (`homeScreen`, `footerScreens`)

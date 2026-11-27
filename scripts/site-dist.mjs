@@ -64,7 +64,7 @@ function setPublicPath(manifest, publicPath) {
 }
 
 /**
- * Lays out the remotes in site/dist and rewrites the aggregate there. Fails, before writing anything, when dist/ has no aggregate or when an aggregate config names a manifest no built package carries.
+ * Lays out every remote of the aggregate in site/dist and rewrites the aggregate there; an unlisted screen is laid out and registered like any other, since its pages open by their address (`scripts/site-publish.mjs`). Fails, before writing anything, when dist/ has no aggregate or when an aggregate config names a manifest no built package carries.
  * @param {string} siteDir - the site directory (`site/`)
  * @returns {string[]} the package directories laid out, in aggregate order
  */

@@ -1,0 +1,326 @@
+// @vitest-environment node
+import { createHash } from 'node:crypto';
+import fs from 'node:fs';
+import path from 'node:path';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { check, generate } from './generate.ts';
+import { renderRobots } from './outputs.ts';
+import { pruneOutline } from './publish.ts';
+import { buildPageMap, resolveIndexing } from './site.ts';
+import { CONFIG } from './test-support/fixtures.ts';
+import { makeProject, write } from './test-support/project.ts';
+
+const roots: string[] = [];
+afterEach(() => {
+  for (const root of roots.splice(0)) fs.rmSync(root, { recursive: true, force: true });
+});
+
+const ORIGIN = 'https://site.example';
+const read = (paths: { dist: string }, file: string) => fs.readFileSync(path.join(paths.dist, file), 'utf8');
+type MapPage = { indexable: boolean };
+type InlinedMap = { home: MapPage; fallback: MapPage; screens: Record<string, { pages: Record<string, MapPage>; patterns: MapPage[] }> };
+const pageMapOf = (html: string): InlinedMap => JSON.parse(/<script type="application\/json" id="site-meta-map">([\s\S]*?)<\/script>/.exec(html)?.[1] ?? '{}');
+
+/** A home outline that links the demo screen three ways: a card, a labelled link and a map-like node. */
+function writeHomeOutline(paths: { packages: string }) {
+  write(path.join(paths.packages, 'home-mfe', 'src', 'i18n', 'en.json'), { title: 'Home' });
+  write(path.join(paths.packages, 'home-mfe', 'src', 'content', 'outline.json'), {
+    screen: 'home',
+    strings: 'src/i18n/en.json',
+    pages: [
+      {
+        route: '/',
+        title: 't:title',
+        lead: 'Welcome.',
+        entries: [
+          { type: 'card-tiles', items: [{ title: 'Demo', href: { extension: 'ext.demo' } }, { title: 'Source', href: { url: 'https://source.example/' } }] },
+          { type: 'cta-box', title: 'Try it', text: 'Open the demo.', action: { label: 'Open', href: { extension: 'ext.demo' } } },
+          { type: 'logo-strip', id: 'home-teams', title: 'Teams', logos: [{ name: 'Team', logo: 'team.svg', width: 1, height: 1, href: { url: 'https://team.example/' } }] },
+        ],
+      },
+    ],
+  });
+}
+
+describe('resolveIndexing', () => {
+  it('is on by default, takes on and off, and refuses any other value', () => {
+    expect(resolveIndexing({})).toBe('on');
+    expect(resolveIndexing({ SITE_INDEXING: 'on' })).toBe('on');
+    expect(resolveIndexing({ SITE_INDEXING: 'off' })).toBe('off');
+    for (const value of ['', 'OFF', 'no', 'false']) expect(() => resolveIndexing({ SITE_INDEXING: value })).toThrow(`SITE_INDEXING is "${value}"`);
+  });
+});
+
+describe('indexing off', () => {
+  it('makes no page indexable, pattern routes and the home page included', () => {
+    const extension = { id: 'ext.home', route: '/home', packageName: 'home-mfe', seo: { title: 'Home', routes: { '/$id': { title: 'One' }, '/open': { title: 'Open', indexable: true } } } };
+    const map = buildPageMap(CONFIG, ORIGIN, 'screen', [extension], 'off');
+    const home = map.screens.home;
+    expect(map.home.indexable).toBe(false);
+    expect([...Object.values(home?.pages ?? {}), ...(home?.patterns ?? [])].map((page) => page.indexable)).toEqual([false, false, false]);
+    expect(renderRobots(map, 'off')).toBe('User-agent: *\nDisallow: /\n');
+  });
+
+  it('generates noindex heads, a sitemap without addresses, a robots.txt that disallows everything and no llms.txt; check holds and refuses a planted llms.txt', async () => {
+    const paths = makeProject(roots);
+    write(path.join(paths.dist, 'llms.txt'), 'left by an indexable build\n');
+    await generate({ paths }, { SITE_ORIGIN: ORIGIN, SITE_INDEXING: 'off' });
+    const html = read(paths, 'index.html');
+    expect(html).toContain('<meta name="robots" content="noindex, follow" />');
+    expect(html).not.toContain('content="index, follow"');
+    const map = pageMapOf(html);
+    const pages = [map.home, map.fallback, ...Object.values(map.screens).flatMap((screen) => [...Object.values(screen.pages), ...screen.patterns])];
+    expect(pages.every((page) => page.indexable === false)).toBe(true);
+    expect(read(paths, 'sitemap.xml')).not.toContain('<url>');
+    expect(read(paths, 'robots.txt')).toBe('User-agent: *\nDisallow: /\n');
+    expect(fs.existsSync(path.join(paths.dist, 'llms.txt'))).toBe(false);
+    expect(JSON.parse(read(paths, 'seo-manifest.json')).site.indexing).toBe('off');
+    expect(await check({ paths })).toEqual({ errors: [], compared: true });
+    write(path.join(paths.dist, 'llms.txt'), 'planted\n');
+    expect((await check({ paths })).errors).toEqual(['dist/llms.txt is published although the build may not be indexed; run npm run seo:generate']);
+  });
+
+  it('leaves an indexing-on build as it was: index, follow, the sitemap address and llms.txt', async () => {
+    const paths = makeProject(roots);
+    await generate({ paths }, { SITE_ORIGIN: ORIGIN });
+    expect(read(paths, 'index.html')).toContain('<meta name="robots" content="index, follow" />');
+    expect(read(paths, 'robots.txt')).toBe(`User-agent: *\nAllow: /\n\nSitemap: ${ORIGIN}/sitemap.xml\n`);
+    expect(read(paths, 'sitemap.xml')).toContain(`<loc>${ORIGIN}/?screen=home</loc>`);
+    expect(fs.existsSync(path.join(paths.dist, 'llms.txt'))).toBe(true);
+    expect(JSON.parse(read(paths, 'seo-manifest.json')).site.indexing).toBe('on');
+  });
+});
+
+describe('unlistedScreens', () => {
+  it('keeps an unlisted screen in the page map, every page of it noindex, leaves it out of the listings and the twins, and prunes the links listed outlines hold to it', async () => {
+    const paths = makeProject(roots);
+    writeHomeOutline(paths);
+    write(paths.config, { ...CONFIG, unlistedScreens: ['demo'], hiddenEntries: ['home-teams'] });
+    const written = await generate({ paths }, { SITE_ORIGIN: ORIGIN });
+    expect(written.filter((file) => file.endsWith('.md'))).toEqual(['dist/home/index.md']);
+    for (const file of ['seo-manifest.json', 'sitemap.xml', 'llms.txt', 'home/index.md']) expect(read(paths, file)).not.toMatch(/screen=demo/);
+    const demo = pageMapOf(read(paths, 'index.html')).screens.demo;
+    expect(Object.entries(demo?.pages ?? {}).map(([route, page]) => [route, page.indexable])).toEqual([
+      ['/', false],
+      ['/week', false],
+    ]);
+    expect(pageMapOf(read(paths, 'index.html')).screens.home?.pages['/']?.indexable).toBe(true);
+    const twin = read(paths, 'home/index.md');
+    expect(twin).toContain('[Source](https://source.example/)');
+    expect(twin).not.toContain('Try it');
+    expect(twin).not.toContain('Teams');
+    expect(await check({ paths })).toEqual({ errors: [], compared: true });
+  });
+
+  it('removes the twins an earlier generation wrote once their screen is unlisted, keeps every Markdown file it did not write, a screen folder included, and check reports a twin planted back', async () => {
+    const paths = makeProject(roots);
+    await generate({ paths }, { SITE_ORIGIN: ORIGIN });
+    const twin = fs.readFileSync(path.join(paths.dist, 'demo', 'index.md'), 'utf8');
+    // Authored Markdown the host's public folder copies into the build, a screen's folder included, and a remote's file: no generation wrote them.
+    const kept = ['demo/notes.md', 'notes.md', 'assets/notes.md', 'mfe/demo-mfe/README.md'];
+    for (const file of kept) write(path.join(paths.dist, file), 'not a twin\n');
+    write(paths.config, { ...CONFIG, unlistedScreens: ['demo'] });
+    await generate({ paths }, { SITE_ORIGIN: ORIGIN });
+    expect(['demo/index.md', 'demo/week.md'].filter((file) => fs.existsSync(path.join(paths.dist, file)))).toEqual([]);
+    expect(kept.filter((file) => fs.existsSync(path.join(paths.dist, file)))).toEqual(kept);
+    expect(await check({ paths })).toEqual({ errors: [], compared: true });
+    write(path.join(paths.dist, 'demo', 'index.md'), twin);
+    expect((await check({ paths })).errors).toEqual(['dist/demo/index.md is a twin the sources no longer generate; run npm run seo:generate']);
+  });
+
+  it('removes the twins of a screen that left the composition, and check reports one planted back', async () => {
+    const paths = makeProject(roots);
+    await generate({ paths }, { SITE_ORIGIN: ORIGIN });
+    const twin = fs.readFileSync(path.join(paths.dist, 'demo', 'week.md'), 'utf8');
+    fs.rmSync(path.join(paths.packages, 'demo-mfe'), { recursive: true });
+    await generate({ paths }, { SITE_ORIGIN: ORIGIN });
+    expect(['demo/index.md', 'demo/week.md'].filter((file) => fs.existsSync(path.join(paths.dist, file)))).toEqual([]);
+    write(path.join(paths.dist, 'demo', 'week.md'), twin);
+    expect((await check({ paths })).errors).toEqual(['dist/demo/week.md is a twin the sources no longer generate; run npm run seo:generate']);
+  });
+
+  it('removes and reports nothing on the first run, when no generation has recorded its twins yet', async () => {
+    const paths = makeProject(roots);
+    write(path.join(paths.dist, 'demo', 'old.md'), 'no record names it\n');
+    await generate({ paths }, { SITE_ORIGIN: ORIGIN });
+    expect(fs.existsSync(path.join(paths.dist, 'demo', 'old.md'))).toBe(true);
+    expect(await check({ paths })).toEqual({ errors: [], compared: true });
+  });
+
+  it('lists every screen when the list is absent', async () => {
+    const paths = makeProject(roots);
+    writeHomeOutline(paths);
+    await generate({ paths }, { SITE_ORIGIN: ORIGIN });
+    expect(read(paths, 'sitemap.xml')).toContain(`<loc>${ORIGIN}/?screen=demo</loc>`);
+    expect(read(paths, 'home/index.md')).toContain(`[Demo](${ORIGIN}/?screen=demo)`);
+    expect(read(paths, 'home/index.md')).toContain('Teams');
+  });
+
+  it('refuses the former key unpublishedScreens instead of listing every screen', async () => {
+    const paths = makeProject(roots);
+    write(paths.config, { ...CONFIG, unpublishedScreens: ['demo'] });
+    await expect(generate({ paths }, { SITE_ORIGIN: ORIGIN })).rejects.toThrow('site.config.json: unpublishedScreens is now unlistedScreens');
+  });
+
+  it('refuses a token no screen declares, the home screen, and a list that is not one of strings', async () => {
+    const paths = makeProject(roots);
+    write(paths.config, { ...CONFIG, unlistedScreens: ['nope'] });
+    await expect(generate({ paths }, { SITE_ORIGIN: ORIGIN })).rejects.toThrow('site.config.json.unlistedScreens names "nope", which no screen of the site declares');
+    write(paths.config, { ...CONFIG, unlistedScreens: ['home'] });
+    await expect(generate({ paths }, { SITE_ORIGIN: ORIGIN })).rejects.toThrow('site.config.json.unlistedScreens names the home screen "home"');
+    write(paths.config, { ...CONFIG, hiddenEntries: 'home-teams' });
+    await expect(generate({ paths }, { SITE_ORIGIN: ORIGIN })).rejects.toThrow('site.config.json: hiddenEntries must be a list of non-empty strings');
+  });
+});
+
+describe('the twin record', () => {
+  const RECORD = path.join('node_modules', '.cache', 'site-meta', 'twins.json');
+  const recordFile = (paths: { project: string }) => path.join(paths.project, RECORD);
+  /** Adds entries to the record a generation wrote, the way a corrupt, hand-edited or copied record would carry them: each with the sha256 of what its path holds now, so only the path rules can keep it. */
+  const plant = (paths: { project: string; dist: string }, entries: string[]) => {
+    const record = JSON.parse(fs.readFileSync(recordFile(paths), 'utf8')) as { twins: Record<string, string> };
+    for (const entry of entries) record.twins[entry] = createHash('sha256').update(fs.readFileSync(path.resolve(paths.dist, entry))).digest('hex');
+    fs.writeFileSync(recordFile(paths), JSON.stringify(record));
+  };
+
+  it('never removes what a record entry names above dist/ with a parent path', async () => {
+    const paths = makeProject(roots);
+    await generate({ paths }, { SITE_ORIGIN: ORIGIN });
+    const outside = path.join(paths.project, 'outside.md');
+    write(outside, 'not in dist\n');
+    plant(paths, ['../outside.md']);
+    await generate({ paths }, { SITE_ORIGIN: ORIGIN });
+    expect(fs.existsSync(outside)).toBe(true);
+    expect(await check({ paths })).toEqual({ errors: [], compared: true });
+  });
+
+  it('never removes what an absolute record entry names', async () => {
+    const paths = makeProject(roots);
+    await generate({ paths }, { SITE_ORIGIN: ORIGIN });
+    const absolute = path.join(paths.project, 'absolute.md');
+    write(absolute, 'not in dist\n');
+    plant(paths, [absolute]);
+    await generate({ paths }, { SITE_ORIGIN: ORIGIN });
+    expect(fs.existsSync(absolute)).toBe(true);
+    expect(await check({ paths })).toEqual({ errors: [], compared: true });
+  });
+
+  it('never removes a recorded file that is not Markdown', async () => {
+    const paths = makeProject(roots);
+    await generate({ paths }, { SITE_ORIGIN: ORIGIN });
+    write(path.join(paths.dist, 'notes.txt'), 'not a twin\n');
+    plant(paths, ['notes.txt']);
+    await generate({ paths }, { SITE_ORIGIN: ORIGIN });
+    expect(fs.existsSync(path.join(paths.dist, 'notes.txt'))).toBe(true);
+  });
+
+  it('never removes a recorded path that is a link', async () => {
+    const paths = makeProject(roots);
+    await generate({ paths }, { SITE_ORIGIN: ORIGIN });
+    write(path.join(paths.project, 'target.md'), 'linked\n');
+    fs.symlinkSync(path.join(paths.project, 'target.md'), path.join(paths.dist, 'demo', 'link.md'));
+    plant(paths, ['demo/link.md']);
+    await generate({ paths }, { SITE_ORIGIN: ORIGIN });
+    expect(fs.lstatSync(path.join(paths.dist, 'demo', 'link.md')).isSymbolicLink()).toBe(true);
+    expect(await check({ paths })).toEqual({ errors: [], compared: true });
+  });
+
+  it('never removes a recorded file reached through a linked folder that leads out of dist/', async () => {
+    const paths = makeProject(roots);
+    await generate({ paths }, { SITE_ORIGIN: ORIGIN });
+    write(path.join(paths.project, 'elsewhere', 'x.md'), 'outside dist\n');
+    fs.symlinkSync(path.join(paths.project, 'elsewhere'), path.join(paths.dist, 'linked'));
+    plant(paths, ['linked/x.md']);
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    await generate({ paths }, { SITE_ORIGIN: ORIGIN });
+    warn.mockRestore();
+    expect(fs.existsSync(path.join(paths.project, 'elsewhere', 'x.md'))).toBe(true);
+  });
+
+  it('skips a record entry the file system cannot take, with a warning, and still generates', async () => {
+    const paths = makeProject(roots);
+    await generate({ paths }, { SITE_ORIGIN: ORIGIN });
+    const record = JSON.parse(fs.readFileSync(recordFile(paths), 'utf8')) as { twins: Record<string, string> };
+    record.twins['demo/\u0000.md'] = 'a'.repeat(64);
+    fs.writeFileSync(recordFile(paths), JSON.stringify(record));
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    await generate({ paths }, { SITE_ORIGIN: ORIGIN });
+    expect(warn.mock.calls.map((call) => String(call[0]))).toEqual([expect.stringContaining('skips the record entry')]);
+    warn.mockRestore();
+    expect(fs.existsSync(path.join(paths.dist, 'demo', 'index.md'))).toBe(true);
+  });
+
+  it('removes nothing on a malformed record, warns about it, and still generates', async () => {
+    const paths = makeProject(roots);
+    await generate({ paths }, { SITE_ORIGIN: ORIGIN });
+    write(paths.config, { ...CONFIG, unlistedScreens: ['demo'] });
+    for (const record of ['{ not json', '{"twins": 5}']) {
+      fs.writeFileSync(recordFile(paths), record);
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+      await generate({ paths }, { SITE_ORIGIN: ORIGIN });
+      expect(warn.mock.calls.map((call) => String(call[0]))).toEqual([expect.stringContaining('the twin record node_modules/.cache/site-meta/twins.json is not one this generator wrote; no twin is removed')]);
+      warn.mockRestore();
+      expect(fs.existsSync(path.join(paths.dist, 'demo', 'index.md'))).toBe(true);
+    }
+  });
+
+  it('keeps Markdown authored later at a former twin path, since its content is not the twin the generator wrote', async () => {
+    const paths = makeProject(roots);
+    await generate({ paths }, { SITE_ORIGIN: ORIGIN });
+    write(paths.config, { ...CONFIG, unlistedScreens: ['demo'] });
+    await generate({ paths }, { SITE_ORIGIN: ORIGIN });
+    write(path.join(paths.dist, 'demo', 'index.md'), 'authored after the screen became unlisted\n');
+    await generate({ paths }, { SITE_ORIGIN: ORIGIN });
+    expect(fs.readFileSync(path.join(paths.dist, 'demo', 'index.md'), 'utf8')).toBe('authored after the screen became unlisted\n');
+    expect(await check({ paths })).toEqual({ errors: [], compared: true });
+  });
+});
+
+describe('pruneOutline', () => {
+  const hidden = { hiddenScreens: ['ext.hidden'], hiddenEntries: ['gone'] };
+  const page = (entries: unknown[], extra: Record<string, unknown> = {}) => ({ screen: 's', strings: 'x', pages: [{ route: '/', title: 't', lead: 'l', ...extra, entries }] });
+  const entriesOf = (value: unknown) => (value as { pages: { entries: unknown[] }[] }).pages[0]?.entries;
+  const toHidden = { extension: 'ext.hidden' };
+  const toShown = { extension: 'ext.shown' };
+
+  it('returns the outline as it is when nothing is hidden', () => {
+    const outline = page([{ type: 'links', lead: 'x', items: [{ label: 'a', href: toHidden }] }]);
+    expect(pruneOutline(outline, { hiddenScreens: [], hiddenEntries: [] })).toBe(outline);
+  });
+
+  it('drops a list item that links a hidden screen and keeps the rest of the list', () => {
+    expect(entriesOf(pruneOutline(page([{ type: 'card-tiles', items: [{ title: 'a', href: toHidden }, { title: 'b', href: toShown }] }]), hidden))).toEqual([{ type: 'card-tiles', items: [{ title: 'b', href: toShown }] }]);
+  });
+
+  it('drops an entry whose list empties, or whose labelled link names a hidden screen, and an entry hidden by id', () => {
+    const entries = [
+      { type: 'card-tiles', items: [{ title: 'a', href: toHidden }] },
+      { type: 'cta-box', title: 't', text: 'x', action: { label: 'go', href: toHidden } },
+      { type: 'logo-strip', id: 'gone', title: 't', logos: [] },
+      { type: 'paragraph', text: 'kept' },
+    ];
+    expect(entriesOf(pruneOutline(page(entries), hidden))).toEqual([{ type: 'paragraph', text: 'kept' }]);
+  });
+
+  it('drops a pair of template cards that loses a card, and keeps a pair that loses none', () => {
+    const whole = { type: 'template-pair', items: [{ title: 'a', href: toShown }, { title: 'b', href: { route: '/b' } }] };
+    const entries = [{ type: 'template-pair', items: [{ title: 'a', href: toHidden }, { title: 'b', href: toShown }] }, whole, { type: 'template-row', items: [{ title: 'a', href: toHidden }, { title: 'b', href: toShown }] }];
+    expect(entriesOf(pruneOutline(page(entries), hidden))).toEqual([whole, { type: 'template-row', items: [{ title: 'b', href: toShown }] }]);
+  });
+
+  it('keeps a node that is neither a list item nor a labelled link, without its link, and drops what goes from a property that is not a list item', () => {
+    const map = { type: 'architecture-map', id: 'm', map: { kit: { title: 'Kit', href: toHidden }, rules: { title: 'Rules', href: toShown } } };
+    const explorer = { type: 'file-explorer', id: 'e', example: { title: 't', text: 'x', screens: [{ title: 'a', href: toHidden }], open: { label: 'open', href: toHidden } } };
+    expect(entriesOf(pruneOutline(page([map, explorer]), hidden))).toEqual([
+      { type: 'architecture-map', id: 'm', map: { kit: { title: 'Kit' }, rules: { title: 'Rules', href: toShown } } },
+      { type: 'file-explorer', id: 'e', example: { title: 't', text: 'x' } },
+    ]);
+  });
+
+  it('keeps every page, its entries list and a back link to a shown screen, and drops a back link to a hidden one', () => {
+    const pruned = pruneOutline(page([{ type: 'card-tiles', items: [{ title: 'a', href: toHidden }] }], { back: { label: 'back', href: toHidden } }), hidden) as { pages: Record<string, unknown>[] };
+    expect(pruned.pages).toEqual([{ route: '/', title: 't', lead: 'l', entries: [] }]);
+    const kept = pruneOutline(page([], { back: { label: 'back', href: toShown } }), hidden) as { pages: Record<string, unknown>[] };
+    expect(kept.pages[0]?.back).toEqual({ label: 'back', href: toShown });
+  });
+});

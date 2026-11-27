@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, render, screen } from '@testing-library/react';
 import axe from 'axe-core';
 
@@ -81,6 +81,11 @@ describe('MfeScreenContainer', () => {
   // The composed address as the shell app's navigation facade reads it.
   let address: { pathname: string; search: string };
   let bootstrap: { resolve: () => void; reject: (error: Error) => void };
+
+  // The first import of the container loads its whole graph cold (the inlined ui-kit barrel among it), which took 25 to 72 s under load; doing it once here keeps that out of the first test's budget.
+  beforeAll(async () => {
+    await import('./MfeScreenContainer');
+  }, 180_000);
 
   beforeEach(() => {
     // The bootstrap promise this component reuses across a real remount

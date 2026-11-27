@@ -56,7 +56,8 @@ afterEach(() => {
   for (const dir of dirs.splice(0)) fs.rmSync(dir, { recursive: true, force: true });
 });
 
-describe('release-tags.sh', () => {
+// Each case spawns 20 to 70 git and shell processes, which took up to 5 s a case when the full suite ran them side by side.
+describe('release-tags.sh', { timeout: 30_000 }, () => {
   it('gives the first release its version, sha, line and latest', () => {
     expect(imageTags(repo({ main: ['v0.1.0'] }), 'v0.1.0')).toEqual(['0.1.0', 'sha', '0.1', 'latest']);
   });

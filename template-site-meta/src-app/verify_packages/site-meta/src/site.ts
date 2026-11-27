@@ -26,6 +26,10 @@ export interface SiteConfig {
   readonly backgroundColor?: string;
   /** Sections the site adds to `llms.txt` after the packages, each a heading and its list items (how to build and run the site, for example). */
   readonly llmsSections?: readonly LlmsSection[];
+  /** The screens, by route token, nothing on the site links: their pages are built and open by their address with `noindex`, and they have no sitemap or `llms.txt` line, no `seo-manifest.json` entry, no twin and no link in a listed outline. None when absent. */
+  readonly unlistedScreens?: readonly string[];
+  /** The ids of the outline entries the site does not show, on its pages and in their twins. None when absent. */
+  readonly hiddenEntries?: readonly string[];
 }
 
 /** A section of `llms.txt` the site config adds: `## <heading>`, then each item as a list line. */
@@ -128,6 +132,26 @@ export function resolveOrigin(config: SiteConfig, env: Readonly<Record<string, s
   // @cpt-end:cpt-template-site-meta-algo-page-map-resolve-origin:p1:inst-return-origin
 }
 
+/** Whether search engines may index the build: `on`, or `off` for a build no page of which may be indexed (a preview). */
+export type Indexing = 'on' | 'off';
+
+/**
+ * The indexing of a build: `SITE_INDEXING`, `on` when unset; any value other than `on` or `off` fails the build.
+ * @param env - the environment to read `SITE_INDEXING` from
+ */
+// @cpt-algo:cpt-template-site-meta-algo-page-map-resolve-indexing:p1
+export function resolveIndexing(env: Readonly<Record<string, string | undefined>>): Indexing {
+  // @cpt-begin:cpt-template-site-meta-algo-page-map-resolve-indexing:p1:inst-read-indexing
+  const value = env.SITE_INDEXING ?? 'on';
+  // @cpt-end:cpt-template-site-meta-algo-page-map-resolve-indexing:p1:inst-read-indexing
+  // @cpt-begin:cpt-template-site-meta-algo-page-map-resolve-indexing:p1:inst-if-unknown-indexing
+  if (value !== 'on' && value !== 'off') throw new Error(`SITE_INDEXING is "${value}"; it must be "on" (the default) or "off"`);
+  // @cpt-end:cpt-template-site-meta-algo-page-map-resolve-indexing:p1:inst-if-unknown-indexing
+  // @cpt-begin:cpt-template-site-meta-algo-page-map-resolve-indexing:p1:inst-return-indexing
+  return value;
+  // @cpt-end:cpt-template-site-meta-algo-page-map-resolve-indexing:p1:inst-return-indexing
+}
+
 /** The screen domain's key in the URL grammar: the `route` of the shell's screen domain instance. */
 // @cpt-begin:cpt-template-site-meta-algo-page-map-read-sources:p1:inst-read-screen-domain
 export function readScreenDomain(file: string): { id: string; key: string } {
@@ -197,6 +221,30 @@ export function addressOf(domainKey: string, token: string, route: string): stri
 }
 
 /**
+ * The screens a site leaves unlisted (`unlistedScreens`, by route token): their tokens and their extension ids. Fails when the list names a token no screen declares, or the home screen.
+ * @param config - the site config
+ * @param extensions - the screen extensions of the composed packages
+ */
+// @cpt-algo:cpt-template-site-meta-algo-page-map-published-screens:p1
+export function unlistedScreens(config: SiteConfig, extensions: readonly ScreenExtension[]): { unlisted: string[]; hiddenScreens: string[] } {
+  // @cpt-begin:cpt-template-site-meta-algo-page-map-published-screens:p1:inst-read-list
+  const unlisted = new Set(config.unlistedScreens ?? []);
+  const tokens = new Set(extensions.map(screenToken));
+  // @cpt-end:cpt-template-site-meta-algo-page-map-published-screens:p1:inst-read-list
+  // @cpt-begin:cpt-template-site-meta-algo-page-map-published-screens:p1:inst-if-unknown-token
+  const unknown = [...unlisted].filter((token) => !tokens.has(token));
+  if (unknown.length > 0) throw new Error(`site.config.json.unlistedScreens names ${unknown.map((token) => `"${token}"`).join(', ')}, which no screen of the site declares`);
+  // @cpt-end:cpt-template-site-meta-algo-page-map-published-screens:p1:inst-if-unknown-token
+  // @cpt-begin:cpt-template-site-meta-algo-page-map-published-screens:p1:inst-if-home-unlisted
+  if (unlisted.has(config.homeScreen)) throw new Error(`site.config.json.unlistedScreens names the home screen "${config.homeScreen}"`);
+  // @cpt-end:cpt-template-site-meta-algo-page-map-published-screens:p1:inst-if-home-unlisted
+  // @cpt-begin:cpt-template-site-meta-algo-page-map-published-screens:p1:inst-return-split
+  const unlistedExtensions = extensions.filter((extension) => unlisted.has(screenToken(extension)));
+  return { unlisted: unlistedExtensions.map(screenToken), hiddenScreens: unlistedExtensions.map((extension) => extension.id) };
+  // @cpt-end:cpt-template-site-meta-algo-page-map-published-screens:p1:inst-return-split
+}
+
+/**
  * Screen tokens declared by more than one screen extension, each with the packages that declare it. The page map holds one screen per token, so a duplicate would silently replace pages.
  * @param extensions - the screen extensions of the composed packages
  */
@@ -218,15 +266,17 @@ function documentTitle(config: SiteConfig, title: string, isHome: boolean): stri
 // @cpt-end:cpt-template-site-meta-algo-page-map-build-map:p1:inst-document-title
 
 /**
- * Resolves the page map: one page per screen root and per declared route, canonical URLs on the origin, document titles from the title template (the home page is titled with the site name alone), and the fallback head for an address that names no page. Fails when two screen extensions declare one token.
+ * Resolves the page map: one page per screen root and per declared route, canonical URLs on the origin, document titles from the title template (the home page is titled with the site name alone), and the fallback head for an address that names no page. With indexing off no page is indexable; an unlisted screen keeps its pages, so head-sync gives them their own head, none of them indexable, and is marked so the listings leave it out. Fails when two screen extensions declare one token.
  * @param config - the site config
  * @param origin - the resolved origin
  * @param domainKey - the screen domain's key
  * @param extensions - the screen extensions of the composed packages
+ * @param indexing - whether the build may be indexed
+ * @param unlisted - the route tokens of the screens nothing links
  */
 // @cpt-algo:cpt-template-site-meta-algo-page-map-build-map:p1
 // @cpt-dod:cpt-template-site-meta-dod-page-map-map:p1
-export function buildPageMap(config: SiteConfig, origin: string, domainKey: string, extensions: readonly ScreenExtension[]): SiteMetaMap {
+export function buildPageMap(config: SiteConfig, origin: string, domainKey: string, extensions: readonly ScreenExtension[], indexing: Indexing = 'on', unlisted: readonly string[] = []): SiteMetaMap {
   // @cpt-begin:cpt-template-site-meta-algo-page-map-build-map:p1:inst-if-duplicate-tokens
   const duplicates = duplicateTokens(extensions);
   if (duplicates.length > 0) throw new Error(duplicates.join('; '));
@@ -238,6 +288,7 @@ export function buildPageMap(config: SiteConfig, origin: string, domainKey: stri
     // @cpt-begin:cpt-template-site-meta-algo-page-map-build-map:p1:inst-screen-block
     const seo = extension.seo ?? {};
     const isHomeScreen = token === config.homeScreen;
+    const isUnlisted = unlisted.includes(token);
     // @cpt-end:cpt-template-site-meta-algo-page-map-build-map:p1:inst-screen-block
     // @cpt-begin:cpt-template-site-meta-algo-page-map-build-map:p1:inst-build-page
     const page = (route: string, fields: SeoFields, inherited: SeoFields): PageMeta => {
@@ -252,7 +303,9 @@ export function buildPageMap(config: SiteConfig, origin: string, domainKey: stri
         title,
         documentTitle: documentTitle(config, title, isHomeScreen && route === '/'),
         description: fields.description ?? inherited.description ?? config.defaultDescription,
-        indexable: fields.indexable ?? !isPattern(route),
+        // @cpt-begin:cpt-template-site-meta-algo-page-map-build-map:p1:inst-if-indexing-off
+        indexable: indexing === 'on' && !isUnlisted && (fields.indexable ?? !isPattern(route)),
+        // @cpt-end:cpt-template-site-meta-algo-page-map-build-map:p1:inst-if-indexing-off
         ...(ogImage ? { ogImage } : {}),
       };
     };
@@ -269,7 +322,7 @@ export function buildPageMap(config: SiteConfig, origin: string, domainKey: stri
     }
     // @cpt-end:cpt-template-site-meta-algo-page-map-build-map:p1:inst-foreach-route
     // @cpt-begin:cpt-template-site-meta-algo-page-map-build-map:p1:inst-record-screen
-    screens[token] = { extension: extension.id, label: extension.presentation?.label ?? token, order: extension.presentation?.order ?? Number.MAX_SAFE_INTEGER, pages, patterns };
+    screens[token] = { extension: extension.id, label: extension.presentation?.label ?? token, order: extension.presentation?.order ?? Number.MAX_SAFE_INTEGER, pages, patterns, ...(isUnlisted ? { unlisted: true as const } : {}) };
     // @cpt-end:cpt-template-site-meta-algo-page-map-build-map:p1:inst-record-screen
   }
   // @cpt-end:cpt-template-site-meta-algo-page-map-build-map:p1:inst-foreach-screen
@@ -307,10 +360,11 @@ export function buildPageMap(config: SiteConfig, origin: string, domainKey: stri
   // @cpt-end:cpt-template-site-meta-algo-page-map-build-map:p1:inst-return-map
 }
 
-/** Every page of the map with an address of its own (static pages), screens in menu order, pages in declaration order. */
+/** Every page of the map with an address of its own (static pages), screens in menu order, pages in declaration order; with `listed`, only the pages of the screens the site links. */
 // @cpt-begin:cpt-template-site-meta-algo-page-map-build-map:p1:inst-static-pages
-export function staticPages(map: SiteMetaMap): PageMeta[] {
+export function staticPages(map: SiteMetaMap, { listed = false }: { listed?: boolean } = {}): PageMeta[] {
   return Object.values(map.screens)
+    .filter((screen) => !listed || !screen.unlisted)
     .sort((a, b) => a.order - b.order)
     .flatMap((screen) => Object.values(screen.pages));
 }
